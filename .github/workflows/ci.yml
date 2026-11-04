@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Format
+        run: |
+          out=$(gofmt -s -l $(find . -name '*.go' -not -path './bin/*'))
+          if [ -n "$out" ]; then echo "UNFORMATTED:"; echo "$out"; exit 1; fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test (no skips)
+        run: make test-noskip
+      - name: Race
+        run: go test -count=1 -race ./...
+      - name: Zero dependencies
+        run: make deps-check
+      - name: Cross-compile
+        run: make build-check
+      - name: Binary smoke
+        # The tool must work as a binary, not only as a package: exit codes and
+        # text output are part of the contract.
+        run: |
+          make build
+          ./bin/dshfit version
+          mkdir -p /tmp/p/ok && cd /tmp/p/ok
+          cat > package.json <<'JSON'
+          {"name":"dsh-plugin-ok","version":"1.0.0","files":["cordis.patch.yml"],
+           "peerDependencies":{"@deepseek-ai/dsh-app-boot":"^0.1.0-rc.6"},
+           "dsh":{"bundle":{"patch":"cordis.patch.yml"}}}
+          JSON
+          printf -- '- insert:\n    - id: dsh-plugin-ok\n      name: dsh-plugin-ok\n' > cordis.patch.yml
+          cd - >/dev/null
+          set +e
+          ./bin/dshfit check --host 0.2.0-rc.2 /tmp/p/ok
+          code=$?
+          set -e
+          test "$code" -eq 1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2

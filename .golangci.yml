@@ -1,0 +1,23 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - misspell
+    - unconvert
+  exclusions:
+    rules:
+      # Test files are allowed to ignore a write error on a temp fixture: the
+      # assertion that follows fails loudly anyway.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
