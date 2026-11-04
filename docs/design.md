@@ -1,0 +1,96 @@
+# Design
+
+## The one claim this tool makes
+
+> A plugin that loaded yesterday can fail to load today without its author
+> changing a line, because the *range* it declared was narrower than it looked.
+
+Everything else follows from taking that seriously.
+
+## Layering
+
+```
+cmd/dshfit          thin main: os.Exit(cli.Run(...))
+internal/cli        argument parsing, exit codes, text and JSON rendering
+internal/compat     verdicts: version gating + bundle structure
+internal/manifest   what the bundle promises on disk
+internal/semver     npm range algebra and the prerelease gate
+```
+
+`internal/semver` is pure: no filesystem, no environment, no clock. That is
+deliberate. The interesting failures in this problem are all range-algebra
+failures, and pure code lets each one be pinned by a table row instead of a
+fixture.
+
+`internal/manifest` is the only layer that touches the disk. It reads one
+`package.json` and one patch file, and it never infers: an unreadable patch is an
+error, not an empty list.
+
+## Why the prerelease gate is not optional
+
+A checker that ignores the gate reports the exact opposite of the truth for the
+most common upgrade in this ecosystem:
+
+| host | `^0.1.0-rc.6` numerically | with the gate | correct |
+|---|---|---|---|
+| `0.1.5` | in range | in range | yes |
+| `0.2.0-rc.2` | in range (`0.2.0-rc.2 < 0.2.0`) | **excluded** | excluded |
+
+The second row is the whole reason `dshfit` exists. `internal/semver`
+distinguishes the two rejection kinds:
+
+- `out-of-range` — a comparator failed numerically. The fix is a wider range.
+- `prerelease-gate` — every comparator passed numerically and npm still refused.
+  The fix is a range that *names* the new core with a tag, e.g.
+  `^0.1.0-rc.6 || ^0.2.0-rc.1`.
+
+Collapsing those two into one message would tell users to widen a range that is
+already wide enough, and the real fix would never be suggested.
+
+## Why bundle structure is checked in the same pass
+
+Version gating explains plugins that *visibly* stop working. Bundle structure
+explains plugins that fail **silently**: if `files[]` omits the patch that
+`dsh.bundle.patch` points at, the published tarball installs cleanly, appears in
+the profile, and contributes nothing to the config tree. The symptom is "the
+plugin does nothing", which sends users to the wrong place entirely.
+
+Both are answerable from the same two files, so both belong in one report.
+
+## Severity rules
+
+| situation | severity | why |
+|---|---|---|
+| peer range excludes host | block | the host refuses the bundle; it cannot load |
+| no `dsh.bundle.patch` | block | nothing is ever mounted |
+| patch missing from `files[]` | block | the tarball cannot carry the patch |
+| patch name ≠ package name | block | cordis cannot resolve the entry |
+| `engines.dsh` excludes host | **warn** | documented as unenforced declaration |
+| patch row without `id` | **warn** | loads fine; only blocks config overrides |
+
+The `engines.dsh` row is the one that took a decision. Treating it as a block
+would reject plugins that demonstrably load on the host today. Treating it as
+invisible would throw away the only place an author states their support window.
+A warning keeps the information and keeps the exit code honest.
+
+## Testing strategy
+
+- **Table tests over ranges.** Each row is a claim about npm semantics, including
+  the four rows that describe the 0.2 breakage verbatim.
+- **Fixtures are real directories.** `compat` and `cli` tests write actual
+  `package.json` + `cordis.patch.yml` trees to `t.TempDir()` and read them back,
+  so a change in path handling fails a test instead of passing a mock.
+- **Exit codes are assertions.** The CLI contract (`0` ok, `1` blocked, `2` usage)
+  is what makes the tool usable in CI, so it is tested directly.
+- **No skips.** `make test-noskip` fails on `--- SKIP`. A skipped test in a
+  checker is a claim with no evidence behind it.
+
+## Next
+
+1. Tarball input: read `.tgz` from npm so `dshfit` works before install.
+2. Fix search: given a failing plugin, find the newest published version whose
+   ranges admit the host, and print the exact `dsh plugin add pkg@version` line.
+3. Profile mode: read `dsh --profile X list --json` and evaluate the whole set at
+   once, then diff two host versions side by side.
+4. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
+   the matrix is visible where people actually upgrade.
