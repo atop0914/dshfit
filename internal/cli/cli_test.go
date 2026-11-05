@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -169,5 +172,140 @@ func TestUnknownCommand(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "unknown command") {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+// makeTarball writes a real .tgz so the tarball path is exercised end to end
+// through the same reader the binary uses.
+func makeTarball(t *testing.T, entries map[string]string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body := entries[name]
+		if err := tw.WriteHeader(&tar.Header{
+			Name: "package/" + name, Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "dsh-plugin-good-1.0.0.tgz")
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestCheckAcceptsTarball: the whole point of Day 2 is that a user who only has
+// `npm pack` output gets the same verdict as one with node_modules.
+func TestCheckAcceptsTarball(t *testing.T) {
+	tgz := makeTarball(t, map[string]string{
+		"package.json":     goodPkg,
+		"cordis.patch.yml": goodPatch,
+		"lib/index.js":     "export default 1\n",
+	})
+	code, stdout, stderr := run(t, "check", "--host", "0.2.0-rc.2", tgz)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if !strings.Contains(stdout, "OK") || !strings.Contains(stdout, "(tarball") {
+		t.Errorf("stdout should report an archive-derived verdict:\n%s", stdout)
+	}
+}
+
+func TestCheckTarballBlocked(t *testing.T) {
+	tgz := makeTarball(t, map[string]string{
+		"package.json": `{
+          "name":"dsh-plugin-stale","version":"1.2.0","files":["lib","cordis.patch.yml"],
+          "peerDependencies":{"@deepseek-ai/dsh-app-boot":"^0.1.0-rc.6"},
+          "dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}`,
+		"cordis.patch.yml": goodPatch,
+		"lib/index.js":     "x",
+	})
+	code, stdout, _ := run(t, "check", "--host", "0.2.0-rc.2", tgz)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	for _, want := range []string{"BLOCKED", "peer-range-excludes-host", "prerelease"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestCheckTarballDeclaredFileMissing(t *testing.T) {
+	tgz := makeTarball(t, map[string]string{
+		"package.json":     strings.Replace(goodPkg, `"lib", `, `"lib", "docs", `, 1),
+		"cordis.patch.yml": goodPatch,
+	})
+	code, stdout, _ := run(t, "check", "--host", "0.2.0-rc.2", tgz)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout, "declared-file-not-in-tarball") {
+		t.Errorf("stdout missing the archive cross-check:\n%s", stdout)
+	}
+}
+
+// TestCheckTarballUnreadableIsAReportNotACrash keeps the mixed-argument contract:
+// one bad archive must not hide the verdict for everything else in the run.
+func TestCheckTarballUnreadableIsAReportNotACrash(t *testing.T) {
+	dir := writePlugin(t, map[string]string{
+		"package.json":     goodPkg,
+		"cordis.patch.yml": goodPatch,
+	})
+	bad := filepath.Join(t.TempDir(), "corrupt.tgz")
+	if err := os.WriteFile(bad, []byte("not gzip at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := run(t, "check", "--host", "0.2.0-rc.2", dir, bad)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout, "manifest-unreadable") {
+		t.Errorf("the corrupt archive should be a report:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "1 ok, 0 warn, 1 blocked") {
+		t.Errorf("the good plugin should still be reported:\n%s", stdout)
+	}
+}
+
+func TestCheckJSONCarriesSource(t *testing.T) {
+	tgz := makeTarball(t, map[string]string{
+		"package.json":     goodPkg,
+		"cordis.patch.yml": goodPatch,
+		"lib/index.js":     "x",
+	})
+	code, stdout, stderr := run(t, "check", "--host", "0.2.0-rc.2", "--json", tgz)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr=%s", code, stderr)
+	}
+	var reports []compat.Report
+	if err := json.Unmarshal([]byte(stdout), &reports); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("got %d reports", len(reports))
+	}
+	if reports[0].Source != "tarball" {
+		t.Errorf("source = %q, want tarball", reports[0].Source)
+	}
+	if !strings.HasSuffix(reports[0].Dir, ".tgz") {
+		t.Errorf("dir should be the archive path, got %q", reports[0].Dir)
 	}
 }

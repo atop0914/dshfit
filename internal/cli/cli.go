@@ -17,12 +17,17 @@ import (
 const usage = `dshfit — will these DSH plugins load on that harness version?
 
 usage:
-  dshfit check --host <version> [--json] <plugin-dir>...
+  dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
   dshfit version
   dshfit help
 
-check evaluates each plugin directory against one harness version and exits
-non-zero when any plugin is blocked, so it can gate a CI job or a shell script.
+check evaluates each plugin against one harness version and exits non-zero when
+anything is blocked, so it can gate a CI job or a shell script.
+
+An argument may be an unpacked plugin directory or an npm tarball (.tgz, as
+produced by npm pack). The archive is detected by its gzip magic first and by
+suffix second, and it answers a question a directory cannot: whether the paths
+package.json declares are actually inside the artifact a user downloads.
 
 flags for check:
   --host <version>   harness version to test against, e.g. 0.2.0-rc.2 (required)
@@ -74,20 +79,20 @@ func runCheck(args []string, out, errOut io.Writer) int {
 	}
 	dirs := fs.Args()
 	if len(dirs) == 0 {
-		warnf(errOut, "check: give at least one plugin directory\n")
+		warnf(errOut, "check: give at least one plugin directory or tarball\n")
 		return 2
 	}
 
 	reports := make([]compat.Report, 0, len(dirs))
-	for _, dir := range dirs {
-		p, err := manifest.Load(dir)
+	for _, arg := range dirs {
+		p, err := manifest.LoadPath(arg)
 		if err != nil {
-			// An unreadable manifest is a reportable outcome, not a crash: a
+			// An unreadable input is a reportable outcome, not a crash: a
 			// profile directory often holds one broken checkout, and the user
 			// still needs the verdict for every other plugin in it.
 			reports = append(reports, compat.Report{
-				Plugin:  dir,
-				Dir:     dir,
+				Plugin:  arg,
+				Dir:     arg,
 				Host:    *host,
 				Verdict: compat.Blocked,
 				Issues: []compat.Issue{{
@@ -130,7 +135,11 @@ func writeText(w io.Writer, reports []compat.Report, host string, ok, warn, bloc
 	var b strings.Builder
 	for _, r := range reports {
 		label := strings.ToUpper(string(r.Verdict))
-		fmt.Fprintf(&b, "%-8s %s@%s  %s\n", label, r.Plugin, r.Version, r.Dir)
+		origin := r.Dir
+		if r.Source == string(manifest.TarballSource) {
+			origin += "  (tarball, files[] cross-checked against the archive)"
+		}
+		fmt.Fprintf(&b, "%-8s %s@%s  %s\n", label, r.Plugin, r.Version, origin)
 		for _, is := range r.Issues {
 			subject := is.Package
 			if subject == "" {
