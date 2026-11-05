@@ -48,9 +48,14 @@ type Issue struct {
 
 // Report is the per-plugin result.
 type Report struct {
-	Plugin  string  `json:"plugin"`
-	Version string  `json:"version"`
-	Dir     string  `json:"dir"`
+	Plugin  string `json:"plugin"`
+	Version string `json:"version"`
+	// Dir is the path the user pointed at: a plugin directory, or the tarball.
+	Dir string `json:"dir"`
+	// Source is "dir" or "tarball". It is part of the contract because some
+	// findings can only be verified against an archive, and a consumer reading
+	// JSON needs to know which ones it is looking at.
+	Source  string  `json:"source,omitempty"`
 	Host    string  `json:"host"`
 	Verdict Verdict `json:"verdict"`
 	Issues  []Issue `json:"issues"`
@@ -65,10 +70,12 @@ func Evaluate(p *manifest.Plugin, hostStr string) (Report, error) {
 	rep := Report{
 		Plugin:  p.Name,
 		Version: p.Version,
-		Dir:     p.Dir,
+		Dir:     p.Location(),
+		Source:  string(p.Source),
 		Host:    host.String(),
 	}
 
+	rep.Issues = append(rep.Issues, checkTarball(p)...)
 	rep.Issues = append(rep.Issues, checkBundle(p)...)
 	rep.Issues = append(rep.Issues, checkPeers(p, host)...)
 	rep.Issues = append(rep.Issues, checkEngines(p, host)...)
@@ -87,6 +94,93 @@ func Evaluate(p *manifest.Plugin, hostStr string) (Report, error) {
 	return rep, nil
 }
 
+// checkTarball reports what only an archive can prove: that the paths
+// package.json declares are actually inside the artifact a user downloads, and
+// that nothing in the archive tries to address a path outside the package.
+//
+// It is silent for directory input on purpose. A checkout has no tarball, so
+// "declared but not packed" is not a fact about it, and reporting the absence of
+// evidence as a finding would block every directory the user pointed at.
+func checkTarball(p *manifest.Plugin) []Issue {
+	if p.Source != manifest.TarballSource {
+		return nil
+	}
+
+	var issues []Issue
+	for _, u := range p.Unsafe {
+		code := "tarball-entry-outside-package"
+		detail := fmt.Sprintf("archive entry %q resolves outside the package root (package/), so "+
+			"extracting it could write anywhere on disk; the entry was refused, so the package is "+
+			"not safe to install", u.Path)
+		if u.Reason != manifest.ReasonOutside {
+			code = "tarball-entry-unsafe"
+			detail = fmt.Sprintf("archive entry %q is a %s entry; a package that ships links or "+
+				"special files can redirect an extractor through them, so the entry was refused",
+				u.Path, u.Reason)
+		}
+		issues = append(issues, Issue{
+			Severity: Block,
+			Code:     code,
+			Range:    u.Path,
+			Detail:   detail,
+		})
+	}
+
+	for _, f := range p.Files {
+		if !checkableFileEntry(f) {
+			continue
+		}
+		if entryCovered(p.Entries, f) {
+			continue
+		}
+		issues = append(issues, Issue{
+			Severity: Block,
+			Code:     "declared-file-not-in-tarball",
+			Range:    f,
+			Detail: fmt.Sprintf("files[] declares %q but it is not in the archive; npm packed the "+
+				"package without it (.npmignore, a skipped prepare, or a stale entry), so whatever "+
+				"depends on that path will be missing after install", f),
+		})
+	}
+	return issues
+}
+
+// checkableFileEntry reports whether a files[] entry can be answered by looking
+// at archive entries at all. Globs and negations cannot: "lib/*.js" is a pattern
+// over paths, not a path, and treating its absence as a missing file would block
+// packages that are perfectly fine. Refusing to answer is the only honest option,
+// and it is invisible only because these forms are a small minority.
+func checkableFileEntry(f string) bool {
+	f = strings.TrimSpace(f)
+	if f == "" || f == "." || f == "./" {
+		return false
+	}
+	if strings.HasPrefix(f, "!") {
+		return false // a negation excludes, so it is absent by definition
+	}
+	return !strings.ContainsAny(f, "*?[]{}")
+}
+
+// entryCovered reports whether target names something the archive contains:
+// either the entry itself or a directory prefix that holds entries. It does not
+// infer that a prefix "should" exist.
+func entryCovered(entries []string, target string) bool {
+	target = strings.TrimPrefix(filepathSlash(target), "./")
+	target = strings.TrimSuffix(target, "/")
+	if target == "" {
+		return true
+	}
+	for _, e := range entries {
+		if e == target {
+			return true
+		}
+		if strings.HasPrefix(e, target+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func checkBundle(p *manifest.Plugin) []Issue {
 	if p.Bundle == nil || p.Bundle.Patch == "" {
 		return []Issue{{
@@ -99,7 +193,12 @@ func checkBundle(p *manifest.Plugin) []Issue {
 
 	var issues []Issue
 	patch := p.Bundle.Patch
-	if len(p.Files) > 0 && !filesCover(p.Files, patch) {
+	// With a real archive the prediction is verifiable, and a stale files[] entry
+	// that the tarball disproves must not become a block: the patch demonstrably
+	// ships, so the package loads. Without an archive there is nothing to check
+	// against, and the declaration is the only evidence available.
+	packedAnyway := p.Source == manifest.TarballSource && p.Contains(patch)
+	if len(p.Files) > 0 && !filesCover(p.Files, patch) && !packedAnyway {
 		issues = append(issues, Issue{
 			Severity: Block,
 			Code:     "patch-missing-from-files",
