@@ -12,8 +12,8 @@ Everything else follows from taking that seriously.
 ```
 cmd/dshfit          thin main: os.Exit(cli.Run(...))
 internal/cli        argument parsing, exit codes, text and JSON rendering
-internal/compat     verdicts: version gating + bundle structure
-internal/manifest   what the bundle promises on disk
+internal/compat     verdicts: version gating + bundle structure + archive cross-checks
+internal/manifest   what the bundle promises: a directory or an npm tarball
 internal/semver     npm range algebra and the prerelease gate
 ```
 
@@ -23,8 +23,10 @@ failures, and pure code lets each one be pinned by a table row instead of a
 fixture.
 
 `internal/manifest` is the only layer that touches the disk. It reads one
-`package.json` and one patch file, and it never infers: an unreadable patch is an
-error, not an empty list.
+`package.json`, one patch file, and — when given a `.tgz` — the archive those two
+came out of. It never infers: an unreadable patch is an error, not an empty list,
+and an archive that is not rooted at `package/` is an error, not a guess about
+which segment was the root.
 
 ## Why the prerelease gate is not optional
 
@@ -57,6 +59,39 @@ plugin does nothing", which sends users to the wrong place entirely.
 
 Both are answerable from the same two files, so both belong in one report.
 
+## Why the archive is a different witness
+
+`files[]` is a promise. `package/patch-missing-from-files` is the prediction you
+can make from that promise without an artifact: the patch is not in the list, so
+the publish will not carry it. A `.tgz` replaces prediction with evidence, and
+evidence can contradict the promise in both directions:
+
+| what we observe | what it means |
+|---|---|
+| `files[]` names it, archive lacks it | the publish silently dropped something the manifest advertises |
+| archive has it, `files[]` omits it | the declaration is stale; the package works |
+
+The second row is why the tarball path does not simply re-run the directory
+checks. A tool that blocks a package whose contents it can see, and which loads
+fine, is a tool users learn to ignore — and the whole value here is that a block
+means something. So when an archive is present, `patch-missing-from-files` is
+dropped if the patch is demonstrably inside it, while
+`declared-file-not-in-tarball` takes over the first row with better evidence.
+
+The same asymmetry explains why these codes are silent for directory input. A
+checkout has no archive; "declared but not packed" is not a fact about it, and
+reporting the absence of evidence as a finding would block every directory the
+user pointed at. `TestTarballModeIsNotDirectoryMode` pins that, because it is the
+one property whose failure would be invisible in normal use and fatal to trust.
+
+Untrusted input is handled by refusing rather than repairing. Escape paths,
+absolute paths, drive letters, symlinks and special files are recorded and
+skipped before anything is read from them; an archive with no `package/` prefix at
+all is an error. Normalising `package/../evil` into `evil` would produce a
+plausible-looking verdict about a package that is not the one on disk. Entry count
+and unpacked size are capped, because the reader holds the archive in memory —
+which is also why nothing is ever extracted: a hostile entry has nowhere to land.
+
 ## Severity rules
 
 | situation | severity | why |
@@ -65,6 +100,9 @@ Both are answerable from the same two files, so both belong in one report.
 | no `dsh.bundle.patch` | block | nothing is ever mounted |
 | patch missing from `files[]` | block | the tarball cannot carry the patch |
 | patch name ≠ package name | block | cordis cannot resolve the entry |
+| declared file absent from archive | block | the publish contradicts the manifest |
+| archive entry escapes `package/` | block | extraction could write outside the package |
+| archive entry is a link or special file | block | an extractor can be redirected through it |
 | `engines.dsh` excludes host | **warn** | documented as unenforced declaration |
 | patch row without `id` | **warn** | loads fine; only blocks config overrides |
 
@@ -80,6 +118,19 @@ A warning keeps the information and keeps the exit code honest.
 - **Fixtures are real directories.** `compat` and `cli` tests write actual
   `package.json` + `cordis.patch.yml` trees to `t.TempDir()` and read them back,
   so a change in path handling fails a test instead of passing a mock.
+- **Archives are really built.** The tarball tests write a gzip stream and a tar
+  stream with `archive/tar` and `archive/gzip`, then read it through the same
+  code the binary uses. A fabricated struct would let a regression in the reader
+  pass unnoticed.
+- **Reverse assertions.** Every "we report X" test is paired with a case that
+  must *not* report X: directory input must never produce archive codes, and a
+  package inside its own range must never be blocked. A checker that over-reports
+  is worse than one that under-reports, because over-reporting is what teaches
+  users to bypass it.
+- **Mutations confirm the tests fail.** Batch 2 was checked by breaking the code
+  five ways — escape detection made always-true, `..` detection removed, the
+  directory guard deleted, file coverage made always-true, and an extra
+  out-of-package entry injected — each turned a specific test red.
 - **Exit codes are assertions.** The CLI contract (`0` ok, `1` blocked, `2` usage)
   is what makes the tool usable in CI, so it is tested directly.
 - **No skips.** `make test-noskip` fails on `--- SKIP`. A skipped test in a
@@ -87,10 +138,11 @@ A warning keeps the information and keeps the exit code honest.
 
 ## Next
 
-1. Tarball input: read `.tgz` from npm so `dshfit` works before install.
+1. Profile mode: read `dsh --profile X list --json`, evaluate the whole set at
+   once, and group the output by root cause.
 2. Fix search: given a failing plugin, find the newest published version whose
    ranges admit the host, and print the exact `dsh plugin add pkg@version` line.
-3. Profile mode: read `dsh --profile X list --json` and evaluate the whole set at
-   once, then diff two host versions side by side.
+3. Version diff: host A against host B, differences only, byte-identical across
+   runs.
 4. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
    the matrix is visible where people actually upgrade.

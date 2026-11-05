@@ -52,12 +52,46 @@ happens to, or why. That is the gap `dshfit` fills.
 | `patch-missing-from-files` | block | `files[]` omits the patch the bundle points at |
 | `patch-unreadable` | block | the patch has no readable `insert` block |
 | `patch-name-mismatch` | block | a patch row inserts a name that is not the package |
+| `declared-file-not-in-tarball` | block | *(tarball only)* `files[]` declares a path the archive does not contain |
+| `tarball-entry-outside-package` | block | *(tarball only)* an archive entry resolves outside `package/` |
+| `tarball-entry-unsafe` | block | *(tarball only)* an archive entry is a symlink, hardlink, or special file |
 | `engines-dsh-excludes-host` | warn | author's declared support window excludes the host |
 | `patch-row-without-id` | warn | a patch row cannot be targeted by a user config layer |
 
 `engines.dsh` is a warning, never a block, because it is currently a declaration
 that nothing in the host enforces. Blocking on it would reject plugins that load
 fine today; hiding it would discard what the author explicitly wrote down.
+
+### Tarball input
+
+Point `check` at a `.tgz` (anything `npm pack` produced, or a downloaded registry
+tarball) and the archive becomes the evidence, not the manifest's promise: three
+checks can only run there.
+
+```console
+$ dshfit check --host 0.2.0-rc.2 ./dsh-openviking-2.0.1.tgz
+BLOCKED  dsh-openviking@2.0.1  ./dsh-openviking-2.0.1.tgz  (tarball, files[] cross-checked against the archive)
+  block declared-file-not-in-tarball dsh-openviking docs
+        files[] declares "docs" but it is not in the archive; npm packed the package without it
+        (.npmignore, a skipped prepare, or a stale entry), so whatever depends on that path will be
+        missing after install
+```
+
+The argument is classified by content first (gzip magic) and name second, so a
+tarball saved under another name is still read as one. Every entry is validated
+before it is interpreted: paths that escape `package/`, absolute paths, and
+links or special files are refused and reported, never normalised into
+something safe-looking. The archive is read into memory — nothing is extracted to
+disk, so a hostile entry has nowhere to land.
+
+Two rules keep this from becoming a false-positive machine:
+
+- Directory input never produces these codes. A checkout has no archive, so
+  "declared but not packed" is not a fact about it.
+- When the archive proves a `files[]` entry is merely stale (the patch is
+  demonstrably inside it), the prediction is dropped rather than turned into a
+  block. A tool that blocks a package you can see works teaches you to ignore it.
+
 
 ## Install
 
@@ -70,23 +104,26 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 ## Usage
 
 ```console
-$ dshfit check --host <version> [--json] <plugin-dir>...
+$ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
 $ dshfit version
 ```
 
-`--json` emits an array of reports (`plugin`, `version`, `dir`, `host`,
-`verdict`, `issues[]`) for scripting.
+`--json` emits an array of reports (`plugin`, `version`, `dir`, `source`, `host`,
+`verdict`, `issues[]`) for scripting. `dir` is whatever you passed — a directory
+or an archive path — and `source` is `dir` or `tarball`, so a consumer can tell
+which findings were verified against an artifact and which were inferred.
 
-An unreadable plugin directory becomes a `manifest-unreadable` report instead of
-aborting the run: a profile with one broken checkout still gets verdicts for
-everything else.
+An unreadable input becomes a `manifest-unreadable` report instead of aborting
+the run: a profile with one broken checkout (or one truncated `.tgz`) still gets
+verdicts for everything else.
 
 ## Scope and honesty
 
-This is the first slice. What it does **not** do yet:
+What it does **not** do yet:
 
-- **No tarball fetching.** It reads directories you point it at; it does not
-  pull from npm or a registry. Pair it with your installed profile.
+- **No registry fetching.** It reads a directory you point it at or a local
+  `.tgz`; it does not download from npm. Pair it with your installed profile or
+  with `npm pack`.
 - **No fix suggestion.** It reports the failing range and the reason, but does
   not yet compute "pin `x@1.2.3`, which declares `^0.1.0-rc.6 || ^0.2.0-rc.1`".
 - **No full YAML parsing.** `cordis.patch.yml` is read by a targeted line
@@ -94,6 +131,14 @@ This is the first slice. What it does **not** do yet:
   error, not an empty result. A patch that hides inserts behind YAML features
   the scanner does not model (anchors, merge keys) will be reported as
   unreadable rather than silently passing.
+- **`files[]` globs are not judged.** `lib/*.js` is a pattern over paths, not a
+  path; treating its absence as a missing file would block packages that are
+  fine. Only literal entries are cross-checked against the archive.
+- **`declared-file-not-in-tarball` is a delivery check, not a load check.** A
+  stale `files[]` entry naming a path the package never had will block too. That
+  is deliberate — the alternative is silence, which is indistinguishable from a
+  clean package — but it is the one place where the verdict is stricter than
+  "will this load".
 - **Range grammar is npm's, not node-semver's bug-for-bug.** It covers
   prefixes, x-ranges, hyphen ranges, unions, carets, tildes and the prerelease
   gate. It does not implement `npm:` aliases or git URLs.
