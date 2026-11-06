@@ -92,6 +92,60 @@ plausible-looking verdict about a package that is not the one on disk. Entry cou
 and unpacked size are capped, because the reader holds the archive in memory —
 which is also why nothing is ever extracted: a hostile entry has nowhere to land.
 
+## Why profile mode reads the package manager, not the directory
+
+The temptation is to walk `<profile>/node_modules` and evaluate every directory
+that has a `package.json`. That answer is wrong in a way that looks right: pnpm's
+layout is a content-addressed store plus symlinks, so a walk sees hoisted copies
+of transitive packages, sees the same package twice under different paths, and
+cannot tell a declared plugin from something a plugin happened to pull in.
+
+`dsh plugin --profile <name> list --json` is a passthrough to `pnpm list` inside
+the profile directory — verified in `@deepseek-ai/dsh` 0.2.2-rc.1, where the
+command forwards any argument it does not own to pnpm — so the listing is the
+package manager's own account of what is declared and what version is installed.
+Parsing it is not a convenience; it is the only source that matches the machine.
+
+The listing is checked for shape rather than decoded tolerantly. Both wrong
+inputs a user actually produces — `dsh plugin list` text, and a single
+`package.json` — decode to "no projects" if the decoder merely tolerates them,
+and an empty profile is indistinguishable from a clean bill of health.
+
+## Why the grouping key is code + reason + range
+
+Profile mode exists to show the shape of a breakage, so the group is the unit of
+the report. The key is the code, the semver rejection reason, and the range text.
+
+**Not the plugin.** Measured on real data: `dsh-pet@0.4.5` rejects the 0.2.2 line
+through nine different peers, all declaring `^0.2.0-rc.1`. Keyed per package that
+is nine groups of one plugin each — a report that says "nine problems" about one
+mistake. The packages stay in the group as the `rejects` list, which is where a
+reader wants them.
+
+**Not merged across reasons.** `out-of-range` and `prerelease-gate` share the
+code `peer-range-excludes-host` and need opposite edits: widen the range, versus
+make the range name the new core with a prerelease tag. A single "incompatible"
+line forces the reader to pick a direction and guess.
+
+**Not normalised across range text.** `^0.2.0-rc.1` and `>=0.2.0-rc.1 <0.3.0`
+describe the same set and stay in separate groups. Merging them would require
+deciding that two different edits are the same edit, and a wrong merge hands
+every plugin in the group one author's fix. Textual identity is provable;
+semantic identity is a judgement call this tool does not need to make.
+
+## What profile mode refuses to judge
+
+- **A package with no `dsh.bundle.patch`** is `not a plugin`, not a blocked one.
+  Real profiles contain data and tooling packages (`dsh-plugin-catalog` ships
+  catalogs), and the installer mounts nothing for them by design. Blocking them
+  would make the blocked count meaningless. The same package pointed at directly
+  is still a block: there the user is asserting it is a plugin.
+- **A package whose manifest cannot be read** is `unknown`, counted separately,
+  and exits non-zero. It is never folded into `ok` and never becomes a root
+  cause: it has no range, so any compatibility attribution would be invented.
+- **Two directories for one name** is `unknown`. Choosing one silently would
+  report a verdict about a directory the host may not be loading.
+
 ## Severity rules
 
 | situation | severity | why |
@@ -135,14 +189,20 @@ A warning keeps the information and keeps the exit code honest.
   is what makes the tool usable in CI, so it is tested directly.
 - **No skips.** `make test-noskip` fails on `--- SKIP`. A skipped test in a
   checker is a claim with no evidence behind it.
+- **The profile listing fixture is a real transcript.** `pnpm list --json` from
+  pnpm 10.34.9 over five published packages, kept byte for byte, so the parser is
+  tested against the shape that exists rather than the shape we would have
+  invented. Its absolute paths are deliberately not required to exist: the test
+  asserts parsing, not a machine.
+- **Grouping is tested in both directions.** Twenty plugins with one cause must
+  collapse into one row, and two causes with the same code must not: different
+  reasons, and different range text, are each a separate test.
 
 ## Next
 
-1. Profile mode: read `dsh --profile X list --json`, evaluate the whole set at
-   once, and group the output by root cause.
-2. Fix search: given a failing plugin, find the newest published version whose
+1. Fix search: given a failing plugin, find the newest published version whose
    ranges admit the host, and print the exact `dsh plugin add pkg@version` line.
-3. Version diff: host A against host B, differences only, byte-identical across
+2. Version diff: host A against host B, differences only, byte-identical across
    runs.
-4. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
+3. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
    the matrix is visible where people actually upgrade.

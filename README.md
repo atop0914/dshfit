@@ -92,6 +92,48 @@ Two rules keep this from becoming a false-positive machine:
   demonstrably inside it), the prediction is dropped rather than turned into a
   block. A tool that blocks a package you can see works teaches you to ignore it.
 
+### Profile mode
+
+`check` answers one plugin at a time. A real upgrade question is about the whole
+profile, and a per-plugin listing buries the shape of the problem: five plugins
+failing for the same reason read as five problems.
+
+```console
+$ dsh plugin --profile web list --json | dshfit profile --host 0.2.2-rc.1 -
+web against host 0.2.2-rc.1 — 5 package(s)
+
+blocked by root cause — 2 cause(s), 2 plugin(s)
+  [block] peer-range-excludes-host  range=^0.2.0-rc.1  reason=prerelease-gate
+    plugins (1): dsh-pet
+    rejects (9):
+      @deepseek-ai/dsh-agent-default-model
+      ...
+      @deepseek-ai/dsh-llm
+    fix: the numbers already pass; only npm's prerelease gate refuses 0.2.2-rc.1. Add a
+         clause naming that exact core with a prerelease tag — `|| >=0.2.2-rc.1` — which is
+         the shape dsh-context uses for the 0.2.2 line. Re-run to confirm.
+  [block] peer-range-excludes-host  range=^0.1.0-rc.6  reason=out-of-range
+    ...
+```
+
+Three rules make the grouping trustworthy:
+
+- **The key is code + reason + range, not the plugin.** Nine peers that all say
+  `^0.2.0-rc.1` are one mistake, so they are one row. The packages stay in it as
+  the `rejects` list.
+- **`out-of-range` and `prerelease-gate` never merge.** They carry opposite
+  instructions: widen the range, or make the range name the new core. One line
+  saying "incompatible" would leave the reader to guess which.
+- **What could not be read is its own section** and exits non-zero. `unknown` is
+  not "ok", and it never becomes a compatibility cause: an unreadable manifest
+  has no range to blame.
+
+A package with no `dsh.bundle.patch` is reported as `not a plugin` rather than
+blocked. In a profile that is what data and tooling packages look like — the real
+`dsh-plugin-catalog` is one — and blocking them would train users to ignore the
+blocked count. Pointed at directly, the same package is still a block, because
+then the user is asserting it is a plugin.
+
 
 ## Install
 
@@ -105,6 +147,7 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 
 ```console
 $ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
+$ dshfit profile --host <version> [--json] <listing.json|->
 $ dshfit version
 ```
 
@@ -121,11 +164,16 @@ verdicts for everything else.
 
 What it does **not** do yet:
 
-- **No registry fetching.** It reads a directory you point it at or a local
-  `.tgz`; it does not download from npm. Pair it with your installed profile or
-  with `npm pack`.
+- **No registry fetching.** It reads a directory you point it at, a local
+  `.tgz`, or the listing your profile's package manager already produced; it does
+  not download from npm.
 - **No fix suggestion.** It reports the failing range and the reason, but does
   not yet compute "pin `x@1.2.3`, which declares `^0.1.0-rc.6 || ^0.2.0-rc.1`".
+  Profile mode names the shape of the edit, and says so as a candidate: only
+  re-running confirms it.
+- **No judgement of what a plugin does.** This tool answers "will it load". It
+  does not audit capabilities, scripts, or network access — that is a different
+  question with a different answer.
 - **No full YAML parsing.** `cordis.patch.yml` is read by a targeted line
   scanner for `insert` rows. It refuses to guess: an unreadable patch is an
   error, not an empty result. A patch that hides inserts behind YAML features
