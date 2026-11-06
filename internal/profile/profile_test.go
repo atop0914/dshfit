@@ -168,9 +168,11 @@ func TestAssessGroupsOneRootCause(t *testing.T) {
 	}
 }
 
-// TestAssessKeepsDifferentReasonsApart is the reverse assertion that makes
-// grouping safe: same code, same host, two diagnoses that need opposite fixes.
-func TestAssessKeepsDifferentReasonsApart(t *testing.T) {
+// TestAssessKeepsDifferentDiagnosesApart is the reverse assertion that makes
+// grouping safe: one code, one host, two plugins that need opposite edits. They
+// must not read as one root cause, and each group's prescription must match its
+// own rejection kind.
+func TestAssessKeepsDifferentDiagnosesApart(t *testing.T) {
 	root := t.TempDir()
 	deps := map[string]Package{
 		"dsh-narrow": {Path: pluginDir(t, root, "dsh-narrow", `"@deepseek-ai/dsh-llm": "^0.1.0-rc.6"`)},
@@ -184,20 +186,51 @@ func TestAssessKeepsDifferentReasonsApart(t *testing.T) {
 		t.Fatalf("got %d groups, want 2 (out-of-range and prerelease-gate must not merge): %+v",
 			len(res.Groups), res.Groups)
 	}
-	reasons := map[string]string{}
 	for _, g := range res.Groups {
-		reasons[g.Plugins[0]] = g.Reason
-	}
-	if reasons["dsh-narrow"] != "out-of-range" {
-		t.Errorf("dsh-narrow reason = %q, want out-of-range", reasons["dsh-narrow"])
-	}
-	if reasons["dsh-gated"] != "prerelease-gate" {
-		t.Errorf("dsh-gated reason = %q, want prerelease-gate", reasons["dsh-gated"])
-	}
-	for _, g := range res.Groups {
-		if g.Plugins[0] == "dsh-narrow" && strings.Contains(g.Fix, "prerelease gate") {
-			t.Errorf("the out-of-range group got the prerelease prescription: %q", g.Fix)
+		switch g.Plugins[0] {
+		case "dsh-narrow":
+			if g.Reason != "out-of-range" {
+				t.Errorf("dsh-narrow reason = %q, want out-of-range", g.Reason)
+			}
+			if strings.Contains(g.Fix, "prerelease gate") {
+				t.Errorf("the out-of-range group got the prerelease prescription: %q", g.Fix)
+			}
+			if !strings.Contains(g.Fix, "stops before") {
+				t.Errorf("the out-of-range group should say the range is too narrow: %q", g.Fix)
+			}
+		case "dsh-gated":
+			if g.Reason != "prerelease-gate" {
+				t.Errorf("dsh-gated reason = %q, want prerelease-gate", g.Reason)
+			}
+			if !strings.Contains(g.Fix, "prerelease gate") || !strings.Contains(g.Fix, "|| >=0.2.2-rc.1") {
+				t.Errorf("the prerelease group should name the gate and the host: %q", g.Fix)
+			}
+		default:
+			t.Errorf("unexpected plugin %q in a group", g.Plugins[0])
 		}
+	}
+}
+
+// TestPrescriptionSeparatesTheTwoRejections pins the rule where it is
+// observable. The group key cannot carry it — reason is a function of the range
+// within one run — so the guarantee lives in the fix text, which is the part a
+// reader acts on. Swapping the two texts is the mutation this catches.
+func TestPrescriptionSeparatesTheTwoRejections(t *testing.T) {
+	host := "0.2.2-rc.1"
+	out := prescription(Group{Code: "peer-range-excludes-host", Reason: "out-of-range", Range: "^0.1.0-rc.6"}, host)
+	gated := prescription(Group{Code: "peer-range-excludes-host", Reason: "prerelease-gate", Range: "^0.2.0-rc.1"}, host)
+
+	if out == gated {
+		t.Fatalf("both rejection kinds got the same prescription: %q", out)
+	}
+	if strings.Contains(out, "prerelease") {
+		t.Errorf("out-of-range must not talk about the prerelease gate: %q", out)
+	}
+	if strings.Contains(gated, "stops before") {
+		t.Errorf("prerelease-gate must not claim the range is numerically too narrow: %q", gated)
+	}
+	if !strings.Contains(gated, "already pass") {
+		t.Errorf("prerelease-gate should say the numbers pass: %q", gated)
 	}
 }
 

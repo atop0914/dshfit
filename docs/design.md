@@ -111,10 +111,10 @@ inputs a user actually produces — `dsh plugin list` text, and a single
 `package.json` — decode to "no projects" if the decoder merely tolerates them,
 and an empty profile is indistinguishable from a clean bill of health.
 
-## Why the grouping key is code + reason + range
+## Why the grouping key is code + range
 
 Profile mode exists to show the shape of a breakage, so the group is the unit of
-the report. The key is the code, the semver rejection reason, and the range text.
+the report. The key is the issue code and the range text.
 
 **Not the plugin.** Measured on real data: `dsh-pet@0.4.5` rejects the 0.2.2 line
 through nine different peers, all declaring `^0.2.0-rc.1`. Keyed per package that
@@ -122,16 +122,25 @@ is nine groups of one plugin each — a report that says "nine problems" about o
 mistake. The packages stay in the group as the `rejects` list, which is where a
 reader wants them.
 
-**Not merged across reasons.** `out-of-range` and `prerelease-gate` share the
-code `peer-range-excludes-host` and need opposite edits: widen the range, versus
-make the range name the new core with a prerelease tag. A single "incompatible"
-line forces the reader to pick a direction and guess.
+**Not the rejection reason**, because within one run it is a function of the
+range: the same range judged against the same host is rejected for the same
+reason, so keying on it could never split a group. The first version of this key
+did include it, and the mutation that removed it survived every test — which is
+how the redundancy surfaced. The reason is still carried in the group, because it
+decides the prescription, and *that* is where the two kinds are kept apart and
+tested.
 
 **Not normalised across range text.** `^0.2.0-rc.1` and `>=0.2.0-rc.1 <0.3.0`
 describe the same set and stay in separate groups. Merging them would require
 deciding that two different edits are the same edit, and a wrong merge hands
 every plugin in the group one author's fix. Textual identity is provable;
 semantic identity is a judgement call this tool does not need to make.
+
+**The two rejection kinds stay apart in the prescription.** `out-of-range` and
+`prerelease-gate` share the code `peer-range-excludes-host` and need opposite
+edits: widen the range, versus make the range name the new core with a prerelease
+tag. One line saying "incompatible" would leave the reader to pick a direction
+and guess, so the fix text is asserted to differ and to say only its own thing.
 
 ## What profile mode refuses to judge
 

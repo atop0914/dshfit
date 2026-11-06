@@ -118,12 +118,12 @@ blocked by root cause — 2 cause(s), 2 plugin(s)
 
 Three rules make the grouping trustworthy:
 
-- **The key is code + reason + range, not the plugin.** Nine peers that all say
+- **The key is code + range, not the plugin.** Nine peers that all say
   `^0.2.0-rc.1` are one mistake, so they are one row. The packages stay in it as
   the `rejects` list.
-- **`out-of-range` and `prerelease-gate` never merge.** They carry opposite
-  instructions: widen the range, or make the range name the new core. One line
-  saying "incompatible" would leave the reader to guess which.
+- **`out-of-range` and `prerelease-gate` never share a prescription.** They
+  carry opposite instructions: widen the range, or make the range name the new
+  core. One line saying "incompatible" would leave the reader to guess which.
 - **What could not be read is its own section** and exits non-zero. `unknown` is
   not "ok", and it never becomes a compatibility cause: an unreadable manifest
   has no range to blame.

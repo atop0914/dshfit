@@ -245,11 +245,18 @@ func countEntries(entries []Entry) Counts {
 
 // groupEntries folds the issues of judged plugins into one row per root cause.
 //
-// The key is code + reason + range, deliberately *not* the package name. The tie
-// was measured on real data: dsh-pet@0.4.5 rejects the 0.2.2 line through nine
+// The key is code + range, deliberately *not* the package name. The tie was
+// measured on real data: dsh-pet@0.4.5 rejects the 0.2.2 line through nine
 // different peers that all declare `^0.2.0-rc.1`, so a per-package key prints
 // nine groups of one plugin each for a single mistake. Packages stay in the
 // group as targets, which is where a reader wants them.
+//
+// Reason is not in the key either, and that is not an oversight: within one run
+// it is a function of (code, range, host) — the same range judged against the
+// same host is rejected for the same reason — so keying on it would be dead
+// weight. It is carried in the group because it decides the prescription, and
+// keeping the two rejection kinds apart is tested through that instead of
+// through a key component that can never differ on its own.
 //
 // Unreadable and non-plugin entries never reach a group: they have no range, so
 // calling them a compatibility cause would be an attribution with no evidence.
@@ -268,7 +275,7 @@ func groupEntries(entries []Entry, host string) []Group {
 			continue
 		}
 		for _, is := range e.Report.Issues {
-			key := is.Code + "\x00" + is.Reason + "\x00" + is.Range
+			key := is.Code + "\x00" + is.Range
 			b, ok := buckets[key]
 			if !ok {
 				b = &bucket{
