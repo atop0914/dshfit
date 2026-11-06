@@ -32,7 +32,7 @@ func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
-	src := io.Reader(in)
+	src := in
 	from := "stdin"
 	base := ""
 	if rest[0] != "-" {

@@ -32,6 +32,15 @@ func TestRangeSatisfies(t *testing.T) {
 		// refused, because npm needs a comparator naming 0.2.0 with a tag.
 		{"open lower bound still gated", ">=0.1.0-rc.6", "0.2.0-rc.2", false, KindPreReleaseGate},
 		{"release lower bound fails numerically", ">=0.2.0", "0.2.0-rc.1", false, KindOutOfRange},
+		// Both rows are verbatim from published plugins, and together they are
+		// the whole argument for the prescription profile mode prints: the
+		// popular workaround (`|| >=0.2.0`) survives one rc line and then stops,
+		// because the clause that was supposed to open the gate has no
+		// prerelease tag on the core that needs it.
+		{"ecosystem: dsh-m's three-clause union still gated on 0.2.2 rc",
+			"^0.1.7-rc.2 || ^0.2.0-rc.1 || >=0.2.0", "0.2.2-rc.1", false, KindPreReleaseGate},
+		{"ecosystem: naming the new core is what actually opens the gate",
+			"^0.2.0-rc.1 || >=0.2.2-rc.1", "0.2.2-rc.1", true, ""},
 
 		{"caret 1 spans minor", "^1.2.3", "1.9.9", true, ""},
 		{"caret 1 stops at 2", "^1.2.3", "2.0.0", false, KindOutOfRange},
