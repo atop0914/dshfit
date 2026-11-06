@@ -1,0 +1,40 @@
+[
+  {
+    "name": "dsh-profile",
+    "version": "0.0.0",
+    "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof",
+    "private": true,
+    "dependencies": {
+      "dsh-context": {
+        "from": "dsh-context",
+        "version": "0.82.1",
+        "resolved": "https://registry.npmmirror.com/dsh-context/-/dsh-context-0.82.1.tgz",
+        "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof\\node_modules\\.pnpm\\dsh-context@0.82.1_@deepsee_ee1f4193bb7d04418374c4066db0c5ab\\node_modules\\dsh-context"
+      },
+      "dsh-m": {
+        "from": "dsh-m",
+        "version": "0.12.7",
+        "resolved": "https://registry.npmmirror.com/dsh-m/-/dsh-m-0.12.7.tgz",
+        "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof\\node_modules\\.pnpm\\dsh-m@0.12.7_@deepseek-ai+c_6664687141ea438ff411bc10c9dfc4fe\\node_modules\\dsh-m"
+      },
+      "dsh-pet": {
+        "from": "dsh-pet",
+        "version": "0.4.5",
+        "resolved": "https://registry.npmmirror.com/dsh-pet/-/dsh-pet-0.4.5.tgz",
+        "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof\\node_modules\\.pnpm\\dsh-pet@0.4.5_ae1843d30014cfc392ad33abecd4b24a\\node_modules\\dsh-pet"
+      },
+      "dsh-plugin-catalog": {
+        "from": "dsh-plugin-catalog",
+        "version": "2026.1106.16122",
+        "resolved": "https://registry.npmmirror.com/dsh-plugin-catalog/-/dsh-plugin-catalog-2026.1106.16122.tgz",
+        "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof\\node_modules\\.pnpm\\dsh-plugin-catalog@2026.1106.16122\\node_modules\\dsh-plugin-catalog"
+      },
+      "dsh-whale-widget": {
+        "from": "dsh-whale-widget",
+        "version": "0.4.2",
+        "resolved": "https://registry.npmmirror.com/dsh-whale-widget/-/dsh-whale-widget-0.4.2.tgz",
+        "path": "C:\\Users\\yitao.zhu\\AppData\\Local\\Temp\\prof\\node_modules\\.pnpm\\dsh-whale-widget@0.4.2\\node_modules\\dsh-whale-widget"
+      }
+    }
+  }
+]

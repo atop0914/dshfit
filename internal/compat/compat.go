@@ -43,7 +43,12 @@ type Issue struct {
 	Code     string   `json:"code"`
 	Package  string   `json:"package,omitempty"`
 	Range    string   `json:"range,omitempty"`
-	Detail   string   `json:"detail"`
+	// Reason carries the semver rejection kind for range issues, so a consumer
+	// can tell "the range is too narrow" from "the numbers pass but the
+	// prerelease gate refuses". The two need opposite edits; a report that only
+	// says "incompatible" makes the reader pick a direction and guess.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail"`
 }
 
 // Report is the per-plugin result.
@@ -262,6 +267,7 @@ func checkPeers(p *manifest.Plugin, host semver.Version) []Issue {
 			Code:     "peer-range-excludes-host",
 			Package:  name,
 			Range:    raw,
+			Reason:   string(exp.Kind),
 			Detail:   exp.Detail,
 		})
 	}
@@ -286,17 +292,18 @@ func checkEngines(p *manifest.Plugin, host semver.Version) []Issue {
 			Detail:   fmt.Sprintf("engines.dsh %q cannot be parsed: %v", raw, err),
 		}}
 	}
-	if exp := rng.Explain(host); exp.Satisfied {
+	exp := rng.Explain(host)
+	if exp.Satisfied {
 		return nil
-	} else {
-		return []Issue{{
-			Severity: Warn,
-			Code:     "engines-dsh-excludes-host",
-			Range:    raw,
-			Detail: exp.Detail + "; engines.dsh is declared intent only (no reader enforces it today), " +
-				"so this will not stop the install, but the author did not claim support for this host",
-		}}
 	}
+	return []Issue{{
+		Severity: Warn,
+		Code:     "engines-dsh-excludes-host",
+		Range:    raw,
+		Reason:   string(exp.Kind),
+		Detail: exp.Detail + "; engines.dsh is declared intent only (no reader enforces it today), " +
+			"so this will not stop the install, but the author did not claim support for this host",
+	}}
 }
 
 // filesCover reports whether an npm files[] entry ships target. An entry covers

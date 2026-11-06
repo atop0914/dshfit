@@ -49,8 +49,13 @@ const stalePkg = `{
 
 func run(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	return runWithStdin(t, "", args...)
+}
+
+func runWithStdin(t *testing.T, stdin string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
 	var out, errOut bytes.Buffer
-	code = Run(args, &out, &errOut)
+	code = Run(strings.NewReader(stdin), args, &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 

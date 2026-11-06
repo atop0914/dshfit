@@ -1,0 +1,4 @@
+# Synthetic fixture for profile mode.
+- insert:
+    - id: dsh-narrow-range
+      name: dsh-narrow-range

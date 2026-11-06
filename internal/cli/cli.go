@@ -18,6 +18,7 @@ const usage = `dshfit — will these DSH plugins load on that harness version?
 
 usage:
   dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
+  dshfit profile --host <version> [--json] <listing.json|->
   dshfit version
   dshfit help
 
@@ -29,9 +30,16 @@ produced by npm pack). The archive is detected by its gzip magic first and by
 suffix second, and it answers a question a directory cannot: whether the paths
 package.json declares are actually inside the artifact a user downloads.
 
-flags for check:
+profile evaluates a whole profile at once and groups the failures by root cause:
+
+  dsh plugin --profile web list --json | dshfit profile --host 0.2.0-rc.2 -
+
+A package with no dsh.bundle.patch is reported as "not a plugin" rather than
+blocked: in a profile that is what data and tooling packages look like.
+
+flags for check and profile:
   --host <version>   harness version to test against, e.g. 0.2.0-rc.2 (required)
-  --json             emit machine-readable reports instead of text
+  --json             emit machine-readable output instead of text
 `
 
 // warnf writes a diagnostic to stderr and deliberately ignores the write error.
@@ -41,8 +49,11 @@ func warnf(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
 }
 
-// Run executes one command and returns the process exit code.
-func Run(args []string, out, errOut io.Writer) int {
+// Run executes one command and returns the process exit code. Stdin is injected
+// for the same reason the writers are: `profile -` reads a listing from a pipe,
+// and a test that has to swap a process-wide stdin is a test that cannot run in
+// parallel with anything else.
+func Run(in io.Reader, args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
 		_, _ = io.WriteString(errOut, usage)
 		return 2
@@ -50,6 +61,8 @@ func Run(args []string, out, errOut io.Writer) int {
 	switch args[0] {
 	case "check":
 		return runCheck(args[1:], out, errOut)
+	case "profile":
+		return runProfile(in, args[1:], out, errOut)
 	case "version", "--version", "-v":
 		if _, err := fmt.Fprintln(out, version.String()); err != nil {
 			return 2

@@ -1,0 +1,48 @@
+[
+  {
+    "name": "web",
+    "version": "0.0.0",
+    "path": ".",
+    "private": true,
+    "dependencies": {
+      "dsh-context": {
+        "from": "dsh-context",
+        "version": "0.82.1",
+        "resolved": "https://registry.npmjs.org/dsh-context/-/dsh-context-0.82.1.tgz",
+        "path": "./plugins/dsh-context"
+      },
+      "dsh-gone": {
+        "from": "dsh-gone",
+        "version": "0.1.0",
+        "resolved": "https://registry.npmjs.org/dsh-gone/-/dsh-gone-0.1.0.tgz",
+        "path": "./plugins/dsh-gone"
+      },
+      "dsh-narrow-range": {
+        "from": "dsh-narrow-range",
+        "version": "1.2.0",
+        "resolved": "https://registry.npmjs.org/dsh-narrow-range/-/dsh-narrow-range-1.2.0.tgz",
+        "path": "./plugins/dsh-narrow-range"
+      },
+      "dsh-pet": {
+        "from": "dsh-pet",
+        "version": "0.4.5",
+        "resolved": "https://registry.npmjs.org/dsh-pet/-/dsh-pet-0.4.5.tgz",
+        "path": "./plugins/dsh-pet"
+      },
+      "dsh-plugin-catalog": {
+        "from": "dsh-plugin-catalog",
+        "version": "2026.1106.16122",
+        "resolved": "https://registry.npmjs.org/dsh-plugin-catalog/-/dsh-plugin-catalog-2026.1106.16122.tgz",
+        "path": "./plugins/dsh-plugin-catalog"
+      }
+    },
+    "devDependencies": {
+      "dsh-context": {
+        "from": "dsh-context",
+        "version": "0.82.1",
+        "resolved": "https://registry.npmjs.org/dsh-context/-/dsh-context-0.82.1.tgz",
+        "path": "./plugins/dsh-context"
+      }
+    }
+  }
+]

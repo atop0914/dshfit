@@ -1,0 +1,28 @@
+{
+  "name": "dsh-plugin-catalog",
+  "version": "2026.1106.16122",
+  "description": "The DeepSeek Harness plugin catalog (9111 entries) · DeepSeek Harness 插件目录",
+  "homepage": "https://awesome-dsh-plugin.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/awesome-dsh-plugin/awesome-dsh-plugin.git"
+  },
+  "license": "CC0-1.0",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "catalog",
+    "registry"
+  ],
+  "catalogSha": "89cf8b1780296fbf8f579bb7dbef8c6c8891223055c138927ebc1291ba3dbb2b",
+  "exports": {
+    "./plugins.json": "./plugins.json",
+    "./index.json": "./index.json"
+  },
+  "files": [
+    "plugins.json",
+    "index.json"
+  ]
+}
