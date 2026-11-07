@@ -156,6 +156,40 @@ func writeGroups(b *strings.Builder, groups []profile.Group) {
 			}
 		}
 		fmt.Fprintf(b, "    fix: %s\n", g.Fix)
+		writeFix(b, g)
+	}
+}
+
+// writeFix prints the solver's answer under a group's prose. The two parts have
+// different jobs: Fix says which direction to move and why, these say exactly
+// what to write and what the written range promises about versions that do not
+// exist yet. Both are printed because a reader who only sees the range will
+// assume it solves more than it does.
+func writeFix(b *strings.Builder, g profile.Group) {
+	if len(g.FixCandidates) > 0 {
+		best := g.FixCandidates[0]
+		fmt.Fprintf(b, "    smallest fix: %s\n", best.Range)
+		if best.Note != "" {
+			fmt.Fprintf(b, "      %s\n", best.Note)
+		}
+		if rest := g.FixCandidates[1:]; len(rest) > 0 {
+			fmt.Fprintf(b, "    other verified fixes:\n")
+			for _, c := range rest {
+				fmt.Fprintf(b, "      %s\n", c.Range)
+				if c.Note != "" {
+					fmt.Fprintf(b, "        %s\n", c.Note)
+				}
+			}
+		}
+	} else if g.FixRefusal != "" {
+		// No candidate is a real outcome: the range does not parse, or it already
+		// admits the host. Printing a guess here would be worse than printing
+		// nothing, so the refusal is printed.
+		fmt.Fprintf(b, "    smallest fix: none — %s\n", g.FixRefusal)
+	}
+	for _, a := range g.FixTried {
+		fmt.Fprintf(b, "    not a fix: %s\n", a.Range)
+		fmt.Fprintf(b, "      %s\n", a.Why)
 	}
 }
 

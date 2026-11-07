@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/atop0914/dshfit/internal/semver"
 )
 
 func writeFile(t *testing.T, path, body string) {
@@ -505,5 +507,131 @@ func TestPrescriptionsAreDistinctPerCode(t *testing.T) {
 		if fix == "" || strings.Contains(fix, "no automatic prescription") {
 			t.Errorf("%s has no prescription: %q", code, fix)
 		}
+	}
+}
+
+// TestGroupCarriesSelfVerifiedCandidates is the Day 4 contract in one test: the
+// range a group tells you to write must be one the same engine accepts, and the
+// range it replaces must be one that really failed. Both halves are re-checked
+// here without trusting the Verified field.
+func TestGroupCarriesSelfVerifiedCandidates(t *testing.T) {
+	root := t.TempDir()
+	dir := pluginDir(t, root, "dsh-narrow-range", `"@deepseek-ai/dsh-llm": "^0.1.0-rc.6"`)
+	res, err := Assess([]Project{{Name: "web", Path: root, Dependencies: map[string]Package{
+		"dsh-narrow-range": {Path: dir},
+	}}}, "0.2.2-rc.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Groups) != 1 {
+		t.Fatalf("groups = %+v, want one", res.Groups)
+	}
+	g := res.Groups[0]
+	if len(g.FixCandidates) == 0 {
+		t.Fatalf("group carries no candidate: %+v", g)
+	}
+	if got, want := g.FixCandidates[0].Range, "^0.1.0-rc.6 || >=0.2.2-rc.1"; got != want {
+		t.Errorf("best candidate = %q, want %q", got, want)
+	}
+	if g.FixRefusal != "" {
+		t.Errorf("a solved group must not carry a refusal: %q", g.FixRefusal)
+	}
+
+	host, err := semver.Parse("0.2.2-rc.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := semver.ParseRange(g.Range)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.Satisfies(host) {
+		t.Fatalf("the group's own range already admits the host: %q", g.Range)
+	}
+	for _, c := range g.FixCandidates {
+		rng, err := semver.ParseRange(c.Range)
+		if err != nil {
+			t.Errorf("candidate %q does not parse: %v", c.Range, err)
+			continue
+		}
+		if !rng.Satisfies(host) {
+			t.Errorf("candidate %q does not admit the host", c.Range)
+		}
+	}
+}
+
+// TestGroupGateHasNoDropTheRangeCandidate: for a prerelease gate the declared
+// numbers were never the problem, so "throw the range away" is not advice.
+func TestGroupGateHasNoDropTheRangeCandidate(t *testing.T) {
+	root := t.TempDir()
+	dir := pluginDir(t, root, "dsh-gated", `"@deepseek-ai/dsh-llm": "^0.2.0-rc.1"`)
+	res, err := Assess([]Project{{Name: "web", Path: root, Dependencies: map[string]Package{
+		"dsh-gated": {Path: dir},
+	}}}, "0.2.2-rc.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := res.Groups[0]
+	if g.Reason != "prerelease-gate" {
+		t.Fatalf("reason = %q", g.Reason)
+	}
+	for _, c := range g.FixCandidates {
+		if c.Range == ">=0.2.2-rc.1" {
+			t.Errorf("the gate group offered dropping the declared range: %+v", g.FixCandidates)
+		}
+	}
+	if len(g.FixTried) == 0 {
+		t.Errorf("the tagless rewrite should be recorded as refused, not omitted: %+v", g.FixCandidates)
+	}
+}
+
+// TestGroupRangeThatCannotBeParsedIsRefused: this is the "say you cannot" path.
+// An unparseable range has no bound to widen, and an empty candidate list
+// printed as if it were a fix would be a suggestion with nothing behind it.
+func TestGroupRangeThatCannotBeParsedIsRefused(t *testing.T) {
+	root := t.TempDir()
+	dir := pluginDir(t, root, "dsh-bad-range", `"@deepseek-ai/dsh-llm": ">=1.2.3.4"`)
+	res, err := Assess([]Project{{Name: "web", Path: root, Dependencies: map[string]Package{
+		"dsh-bad-range": {Path: dir},
+	}}}, "0.2.2-rc.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := res.Groups[0]
+	if g.Code != "unparseable-peer-range" {
+		t.Fatalf("code = %q", g.Code)
+	}
+	if len(g.FixCandidates) != 0 {
+		t.Errorf("candidates = %+v, want none for an unparseable range", g.FixCandidates)
+	}
+	if !strings.Contains(g.FixRefusal, "cannot be parsed") {
+		t.Errorf("refusal = %q, want the parse failure", g.FixRefusal)
+	}
+}
+
+// TestNonRangeCausesCarryNoCandidate: a missing patch file has no range algebra.
+// Attaching a generated range to it would be advice with no evidence, which is
+// exactly what this tool is supposed to stop doing.
+func TestNonRangeCausesCarryNoCandidate(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "plugins", "dsh-engines")
+	writeFile(t, filepath.Join(dir, "package.json"), `{
+      "name": "dsh-engines", "version": "1.0.0", "files": ["lib", "cordis.patch.yml"],
+      "peerDependencies": {"@deepseek-ai/dsh-llm": ">=0.2.2-rc.1"},
+      "engines": {"dsh": "^0.1.0-rc.6"},
+      "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}}`)
+	writeFile(t, filepath.Join(dir, "cordis.patch.yml"), "- insert:\n    - id: e\n      name: dsh-engines\n")
+	res, err := Assess([]Project{{Name: "web", Path: root, Dependencies: map[string]Package{
+		"dsh-engines": {Path: dir},
+	}}}, "0.2.2-rc.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := res.Groups[0]
+	if g.Code != "engines-dsh-excludes-host" {
+		t.Fatalf("code = %q", g.Code)
+	}
+	if len(g.FixCandidates) != 0 || g.FixRefusal != "" {
+		t.Errorf("a non-range cause must carry neither candidates nor a refusal: %+v", g)
 	}
 }

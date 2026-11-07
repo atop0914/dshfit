@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/atop0914/dshfit/internal/profile"
+	"github.com/atop0914/dshfit/internal/semver"
 )
 
 // profileFixture is the listing that exercises every outcome at once: a real
@@ -178,6 +179,96 @@ func TestProfileJSON(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("groups = %+v, want a prerelease-gate group", res.Groups)
+	}
+}
+
+// TestProfileTextPrintsRangesThatWork is Day 4 seen from the outside: the range
+// the binary tells you to write has to be a range its own engine accepts. The
+// text is parsed back out and re-checked, so a suggestion that only looks right
+// fails here.
+func TestProfileTextPrintsRangesThatWork(t *testing.T) {
+	code, stdout, stderr := run(t, "profile", "--host", "0.2.2-rc.1", profileFixture())
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr=%s", code, stderr)
+	}
+	host, err := semver.Parse("0.2.2-rc.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offered, refused []string
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if r, ok := strings.CutPrefix(line, "smallest fix: "); ok {
+			offered = append(offered, r)
+		}
+		if r, ok := strings.CutPrefix(line, "not a fix: "); ok {
+			refused = append(refused, r)
+		}
+	}
+	// Two blocked groups, one printed fix each.
+	if len(offered) != 2 {
+		t.Fatalf("printed %d smallest fixes, want 2:\n%s", len(offered), stdout)
+	}
+	for _, raw := range offered {
+		rng, err := semver.ParseRange(raw)
+		if err != nil {
+			t.Errorf("the printed fix %q does not even parse: %v", raw, err)
+			continue
+		}
+		if !rng.Satisfies(host) {
+			t.Errorf("the printed fix %q does not admit %s", raw, host)
+		}
+	}
+	// The tagless rewrite is what authors write, so it has to be shown — as
+	// refused, never as the answer.
+	if len(refused) == 0 {
+		t.Errorf("no refused shape printed for a prerelease host:\n%s", stdout)
+	}
+	for _, bad := range refused {
+		for _, good := range offered {
+			if bad == good {
+				t.Errorf("%q is printed both as a fix and as not a fix", bad)
+			}
+		}
+	}
+}
+
+// TestProfileJSONCarriesFixCandidates keeps the structured contract in step with
+// the text: a consumer reading JSON gets the same self-verified ranges.
+func TestProfileJSONCarriesFixCandidates(t *testing.T) {
+	code, stdout, stderr := run(t, "profile", "--host", "0.2.2-rc.1", "--json", profileFixture())
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr=%s", code, stderr)
+	}
+	var res profile.Result
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	host, err := semver.Parse("0.2.2-rc.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withFix := 0
+	for _, g := range res.Groups {
+		if len(g.FixCandidates) == 0 {
+			continue
+		}
+		withFix++
+		for _, c := range g.FixCandidates {
+			if !c.Verified {
+				t.Errorf("%s: candidate %q is not marked verified", g.Code, c.Range)
+			}
+			rng, err := semver.ParseRange(c.Range)
+			if err != nil || !rng.Satisfies(host) {
+				t.Errorf("%s: candidate %q does not admit the host (err=%v)", g.Code, c.Range, err)
+			}
+			if c.Shape == "" || c.Note == "" {
+				t.Errorf("%s: candidate %+v is missing its shape or note", g.Code, c)
+			}
+		}
+	}
+	if withFix != 2 {
+		t.Errorf("%d groups carry candidates, want 2:\n%s", withFix, stdout)
 	}
 }
 

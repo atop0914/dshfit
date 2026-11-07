@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/atop0914/dshfit/internal/compat"
+	"github.com/atop0914/dshfit/internal/fix"
 	"github.com/atop0914/dshfit/internal/manifest"
 	"github.com/atop0914/dshfit/internal/semver"
 )
@@ -63,6 +64,20 @@ type Group struct {
 	// Fix is the smallest change that addresses the cause. It is a candidate, not
 	// a proof: re-running is what confirms it.
 	Fix string `json:"fix"`
+	// FixCandidates are rewrites of Range that the range engine itself accepted.
+	// Fix says which direction to move; these say exactly what to write, and each
+	// one was re-parsed and re-tested against the host before it was kept. Empty
+	// for causes that are not about version ranges.
+	FixCandidates []fix.Candidate `json:"fix_candidates,omitempty"`
+	// FixTried records the shapes the solver generated and the engine refused,
+	// with the engine's own reason. It is normally empty; for a prerelease host
+	// it holds the tagless rewrite (`|| >=0.2.2`), which is the shape authors
+	// actually write and the one that does not work.
+	FixTried []fix.Attempt `json:"fix_tried,omitempty"`
+	// FixRefusal explains why a range cause has no candidate: the range does not
+	// parse, or it already admits the host. Empty when candidates exist, and
+	// empty for non-range causes, whose Fix text is already the whole answer.
+	FixRefusal string `json:"fix_refusal,omitempty"`
 }
 
 // Counts is the one-line summary. Plugins counts judged plugins only, so
@@ -304,6 +319,7 @@ func groupEntries(entries []Entry, host string) []Group {
 		b.group.Plugins = sortedSet(b.plugins)
 		b.group.Targets = sortedSet(b.targets)
 		b.group.Fix = prescription(b.group, host)
+		attachFix(&b.group, host)
 		groups = append(groups, b.group)
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
