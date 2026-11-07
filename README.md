@@ -112,11 +112,44 @@ blocked by root cause — 2 cause(s), 2 plugin(s)
     fix: the numbers already pass; only npm's prerelease gate refuses 0.2.2-rc.1. Add a
          clause naming that exact core with a prerelease tag — `|| >=0.2.2-rc.1` — which is
          the shape dsh-context uses for the 0.2.2 line. Re-run to confirm.
+    smallest fix: ^0.2.0-rc.1 || >=0.2.2-rc.1
+      the added clause repeats 0.2.2-rc.1 with its prerelease tag, which is what opens npm's
+      gate; a clause without that tag is refused even though the numbers pass
+    other verified fixes:
+      ^0.2.0-rc.1 || ^0.2.2-rc.1
+        claims ^0.2.2-rc.1 — the host's own line only, instead of every release after it
+      ^0.2.0-rc.1 || 0.2.2-rc.1
+        pins exactly 0.2.2-rc.1: this release and nothing after it, so the next one needs
+        another edit
+    not a fix: ^0.2.0-rc.1 || >=0.2.2
+      0.2.2-rc.1 is a prerelease of 0.2.2, and no comparator in ">=0.2.0-rc.1 <0.3.0" names
+      0.2.2 with a prerelease tag; npm only admits prereleases that the range explicitly
+      opts into
   [block] peer-range-excludes-host  range=^0.1.0-rc.6  reason=out-of-range
     ...
+    smallest fix: ^0.1.0-rc.6 || >=0.2.2-rc.1
 ```
 
-Three rules make the grouping trustworthy:
+`smallest fix` is not a guess. Every range printed there was re-parsed and
+re-tested against the host by the same engine that produced the rejection, and a
+candidate that fails is dropped rather than softened. The `not a fix` entry is
+the shape authors actually reach for — appending the *release* `0.2.2` — kept in
+the output because its refusal is the explanation, not noise.
+
+What each candidate promises is printed with it, because a range edit is a
+promise about versions that do not exist yet:
+
+| shape | what it says |
+|---|---|
+| `R \|\| >=host` | keep what you declare, add the host **and everything after it** |
+| `R \|\| ^host` | keep what you declare, add the host's own line |
+| `R \|\| host` | keep what you declare, add exactly this version |
+| `>=host` | drop what you declare (offered only for a numeric shortfall) |
+
+Nothing here consults the registry, so this is the smallest edit to the *range*,
+not a claim that some published version already declares it.
+
+Four rules make the grouping trustworthy:
 
 - **The key is code + range, not the plugin.** Nine peers that all say
   `^0.2.0-rc.1` are one mistake, so they are one row. The packages stay in it as
@@ -127,6 +160,12 @@ Three rules make the grouping trustworthy:
 - **What could not be read is its own section** and exits non-zero. `unknown` is
   not "ok", and it never becomes a compatibility cause: an unreadable manifest
   has no range to blame.
+- **A fix is only printed if it verifies.** The solver generates candidate
+  rewrites, re-parses each one, and asks the same engine whether the host passes;
+  a candidate that fails never reaches the output. When nothing can be computed —
+  an unparseable range, or a cause that is not about ranges at all — the group
+  says so instead of offering a plausible-looking range.
+
 
 A package with no `dsh.bundle.patch` is reported as `not a plugin` rather than
 blocked. In a profile that is what data and tooling packages look like — the real
@@ -167,10 +206,11 @@ What it does **not** do yet:
 - **No registry fetching.** It reads a directory you point it at, a local
   `.tgz`, or the listing your profile's package manager already produced; it does
   not download from npm.
-- **No fix suggestion.** It reports the failing range and the reason, but does
-  not yet compute "pin `x@1.2.3`, which declares `^0.1.0-rc.6 || ^0.2.0-rc.1`".
-  Profile mode names the shape of the edit, and says so as a candidate: only
-  re-running confirms it.
+- **No fix suggestion from the registry.** It computes the smallest edit to the
+  range and proves npm will accept it, but it does not look up what is published,
+  so it cannot say "pin `x@1.2.3`, which already declares `^0.1.0-rc.6 ||
+  ^0.2.0-rc.1`". For that you still need the registry, and a version that admits
+  the host is a different question from a range that does.
 - **No judgement of what a plugin does.** This tool answers "will it load". It
   does not audit capabilities, scripts, or network access — that is a different
   question with a different answer.

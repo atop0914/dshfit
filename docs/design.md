@@ -142,6 +142,50 @@ edits: widen the range, versus make the range name the new core with a prereleas
 tag. One line saying "incompatible" would leave the reader to pick a direction
 and guess, so the fix text is asserted to differ and to say only its own thing.
 
+## Why the fix solver re-checks its own output
+
+The report answers "who falls and why". The next question is always "so what do I
+write?", and a wrong answer there is worse than no answer: the user applies it,
+still cannot install, and stops believing the tool. So the solver
+(`internal/fix`) generates candidate rewrites and then puts each one back through
+the same `internal/semver` call that produced the rejection. Candidates that fail
+are dropped — never softened into "should work" — and the refusals are kept
+alongside as evidence.
+
+Three decisions follow from that:
+
+**One engine, not two.** A second implementation of "does this range admit this
+version" would agree with the first one until the day it did not, and the
+disagreement would surface as a fix that does not fix. The solver owns no range
+logic at all; it owns text edits and the discipline of checking them.
+
+**The tagless shape is generated in order to be refused.** For a prerelease host
+the solver also builds `R || >=0.2.2` — the append-the-release rewrite every
+author reaches for. It always fails: `0.2.2-rc.1` sorts below `0.2.2`, and the
+gate still wants a comparator naming `0.2.2` *with* a tag. Keeping it in the
+generator is what makes "every candidate was checked" an assertion: delete the
+check and that range shows up in the output as advice, so the tests go red.
+
+**The rejection kind decides what is offered, not just what is said.** For
+`prerelease-gate` the declared numbers were already right, so "throw the range
+away" is not proposed at all — it would trade a nameable defect for an unnamed
+one. For `out-of-range` it is proposed, last, with what it costs written next to
+it.
+
+What the printed range proves is narrow and the wording keeps it narrow: npm will
+admit the host through it. Nothing about whether the plugin works on that host,
+and nothing about versions that do not exist yet — which is why each candidate
+carries the promise it makes (`>=host` claims every later release, `^host` claims
+one line, `host` claims one version). The solver deliberately does not rewrite
+the existing bound in place: "widen `<0.2.0` to `<0.4.0`" is a policy choice
+about how much future to claim, and the tool can verify a candidate but cannot
+choose for the author.
+
+When the range does not parse, or the cause is not a range at all (a missing
+patch file, an `engines.dsh` window), no candidate is produced and the group says
+so. An empty list rendered as if it were a fix is the failure mode this project
+exists to avoid.
+
 ## What profile mode refuses to judge
 
 - **A package with no `dsh.bundle.patch`** is `not a plugin`, not a blocked one.
@@ -206,11 +250,20 @@ A warning keeps the information and keeps the exit code honest.
 - **Grouping is tested in both directions.** Twenty plugins with one cause must
   collapse into one row, and two causes with the same code must not: different
   reasons, and different range text, are each a separate test.
+- **Fixes are re-checked from the outside.** Every solver test re-parses each
+  returned range and asks the engine again, ignoring the `verified` field — the
+  field is what the code claims, the re-check is what the engine says. The CLI
+  test goes one step further and pulls the range back out of the printed text, so
+  a suggestion that is only right in memory fails against the output users read.
+  Both directions are covered: a range that should be offered must appear, and
+  the tagless rewrite must appear only as refused.
 
 ## Next
 
-1. Fix search: given a failing plugin, find the newest published version whose
-   ranges admit the host, and print the exact `dsh plugin add pkg@version` line.
+1. Registry lookup: the solver now produces the smallest edit to a *range*; the
+   remaining question is whether some published version already declares a range
+   that admits the host, which needs `npm view` and a cache. The two answers are
+   different — "write this" versus "install that" — and must not be conflated.
 2. Version diff: host A against host B, differences only, byte-identical across
    runs.
 3. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
