@@ -257,6 +257,53 @@ A warning keeps the information and keeps the exit code honest.
   a suggestion that is only right in memory fails against the output users read.
   Both directions are covered: a range that should be offered must appear, and
   the tagless rewrite must appear only as refused.
+- **The diff is tested on what must be absent.** The fixture pairs one plugin
+  that drops, one that recovers and one that is blocked on both hosts; the test
+  asserts the third name does not appear anywhere in the output. A diff that
+  prints everything scores just as well on "does it mention the plugin that
+  breaks", which is why the negative case is the one that carries the weight.
+
+## Why a diff is not a verdict comparison
+
+Two reports printed side by side cannot be compared by eye. The order, the
+grouping and the prescriptions all differ, and the one line that matters —
+`blocked → blocked` with the reason flipped from `prerelease-gate` to
+`out-of-range` — is precisely the line that looks like no change.
+
+So the change definition is written in the code instead of left to the reader:
+
+1. **Loadability first.** "Not blocked on A, blocked on B" is a drop; the reverse
+   is a recovery. That split decides which section a row lands in, because it is
+   the question the user is asking.
+2. **Then the diagnosis.** When loadability did not move, the comparison is
+   `signature`: status, verdict, and the sorted `code(reason)` labels of every
+   issue. Two sides with the same signature are not a difference and never reach
+   the output. This is what keeps a pre-existing block from being blamed on the
+   upgrade — the most damaging false positive this command could produce.
+3. **Version is not in the signature.** A version bump that changes neither the
+   verdict nor the causes is not something this tool has an opinion about, and
+   printing it would teach the reader to skim the sections that matter.
+4. **Presence is its own kind.** A package on one side only is reported with the
+   state it arrives in, never as "worse": an addition is not a regression, and a
+   data package that is not a plugin cannot break anything.
+
+Three further decisions are worth recording because they are easy to get wrong:
+
+- **The diff never judges a range.** It takes two finished `Result` values, so
+  the CLI runs `Assess` twice. A second judge inside the diff would drift from the
+  first, and the first symptom would be a diff that contradicts a plain run —
+  an argument nobody can settle from the output.
+- **Pairs are matched by name, never by index.** The two `Entries` slices happen
+  to be sorted today, but sorting is `Assess`' internal choice; a diff that pairs
+  entry 3 with entry 3 would start comparing different packages the moment either
+  side gains one.
+- **The exit code follows the target host, with one exception.** Something
+  differs and B has a blocked or unjudged package exits `1`; nothing differs
+  exits `0` even when packages are blocked on both hosts, because a diff answers
+  "did the upgrade change anything that can break me". That exception is printed,
+  not implied: the zero-diff output carries a note pointing at `profile` for the
+  health question, since "no differences" alone reads like a clean bill.
+
 
 ## Next
 
@@ -264,7 +311,7 @@ A warning keeps the information and keeps the exit code honest.
    remaining question is whether some published version already declares a range
    that admits the host, which needs `npm view` and a cache. The two answers are
    different — "write this" versus "install that" — and must not be conflated.
-2. Version diff: host A against host B, differences only, byte-identical across
-   runs.
-3. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
+2. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
    the matrix is visible where people actually upgrade.
+3. CI mode: the same matrix as a GitHub Action comment, gated on the exit code
+   the commands already define.

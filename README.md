@@ -174,6 +174,54 @@ blocked count. Pointed at directly, the same package is still a block, because
 then the user is asserting it is a plugin.
 
 
+### Version diff
+
+`profile` answers "what does this profile do on B". The question right before it
+is "what changes if I move from A to B", and running both and comparing two
+reports by eye does not work: the order, the grouping and the prescriptions all
+differ between them.
+
+```console
+$ dshfit diff --from 0.2.2-rc.1 --to 0.3.0 testdata/profile/web/list.json
+web · host 0.2.2-rc.1 → 0.3.0 — 5 package(s), 1 differ
+
+root cause changed — 1
+  dsh-pet@0.4.5  blocked → blocked
+    before: peer-range-excludes-host(prerelease-gate)
+    after:  peer-range-excludes-host(out-of-range)
+
+5 package(s) on 0.3.0: 1 ok, 0 warn, 2 blocked, 1 unknown, 1 not a plugin
+`dshfit profile --host 0.3.0` prints the cause and the smallest fix for each block.
+1 package(s) could not be judged on 0.3.0; that is not the same as compatible.
+```
+
+That is the case a verdict comparison loses. Both hosts refuse `dsh-pet`, so
+`blocked → blocked` looks like no change — but the prescription flipped from
+"make the range name the new core" to "widen the range", and those two edits are
+not interchangeable. `dsh-narrow-range` is out of range on both hosts, so it is
+not in the report at all.
+
+What counts as a difference, in the order the sections are printed:
+
+| section | meaning |
+|---|---|
+| `will stop loading` | loads on A, blocked on B |
+| `improves` | blocked on A, loads on B (or loses a warning) |
+| `root cause changed` | loadability unchanged, diagnosis differs — including a new warning |
+| `only in the target / source listing` | present on one side only, with the state it arrives in |
+
+A package that behaves identically on both hosts never appears: a block that
+predates the upgrade is not caused by it, and putting it in the report is how a
+diff stops being readable. Both `--from` and `--to` are required — a default on
+either side would answer a question about a version nobody named.
+
+Exit codes answer "did the upgrade change anything that can break me", not "is
+the target host healthy": nothing differs is `0` even when packages are blocked
+on both hosts (the footer says so and points at `profile`), and something differs
+with a blocked or unjudged package on B is `1`. Packages that are only in the
+source listing never fail the run — they are gone after the upgrade.
+
+
 ## Install
 
 Zero runtime dependencies, single static binary:
@@ -187,6 +235,7 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 ```console
 $ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
 $ dshfit profile --host <version> [--json] <listing.json|->
+$ dshfit diff --from <version> --to <version> [--json] <listing.json|->
 $ dshfit version
 ```
 
@@ -194,6 +243,12 @@ $ dshfit version
 `verdict`, `issues[]`) for scripting. `dir` is whatever you passed — a directory
 or an archive path — and `source` is `dir` or `tarball`, so a consumer can tell
 which findings were verified against an artifact and which were inferred.
+
+`diff --json` emits one object instead: `from`, `to`, `projects`, `changes[]`
+(`kind`, `name`, `from`, `to`, and both sides' `status` / `verdict` / `causes`),
+plus `counts` and the target host's own `to_counts`, so a consumer that only sees
+the diff still learns that three other packages are blocked on both hosts.
+Two runs over the same pair produce byte-identical JSON.
 
 An unreadable input becomes a `manifest-unreadable` report instead of aborting
 the run: a profile with one broken checkout (or one truncated `.tgz`) still gets
@@ -214,6 +269,11 @@ What it does **not** do yet:
 - **No judgement of what a plugin does.** This tool answers "will it load". It
   does not audit capabilities, scripts, or network access — that is a different
   question with a different answer.
+- **`diff` moves the host, not the profile.** One listing is read once and judged
+  twice, so the comparison is exactly "same plugins, two harness versions". A
+  package that exists on one side only is reported as such, but a diff cannot
+  tell you that you also upgraded a plugin — that is a profile change, and it
+  needs two listings.
 - **No full YAML parsing.** `cordis.patch.yml` is read by a targeted line
   scanner for `insert` rows. It refuses to guess: an unreadable patch is an
   error, not an empty result. A patch that hides inserts behind YAML features

@@ -44,3 +44,20 @@ line, so the fixture has a second, different root cause next to the real one.
 the absolute paths in the real transcript cannot resolve inside a repository.
 `dsh-gone` names a directory that does not exist on purpose, and `dsh-context`
 appears in both `dependencies` and `devDependencies` on purpose.
+
+## `drift/*`
+
+Synthetic, and named for what each one proves about the diff between
+`0.2.1-rc.3` and `0.2.2-rc.1`:
+
+| package | peers | what it proves |
+|---|---|---|
+| `dsh-pinned` | `^0.2.1-rc.3` | loads on 0.2.1-rc.3, refused by the prerelease gate on 0.2.2-rc.1 — a drop |
+| `dsh-ships` | `^0.2.2-rc.1` | out of range on 0.2.1-rc.3, loads on 0.2.2-rc.1 — a recovery |
+| `dsh-stable` | `>=0.2.0-rc.1 <0.3.0` | refused on both hosts — must not appear in a diff between them |
+
+The pair exists because the `web` fixture above happens to behave identically on
+those two hosts: `dsh-pet` is refused by the gate on both and `dsh-narrow-range`
+is out of range on both, so a diff of `web` over this pair is correctly empty. It
+is kept as the zero-diff case in the CLI tests.
+
