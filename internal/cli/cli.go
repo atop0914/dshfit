@@ -19,6 +19,7 @@ const usage = `dshfit — will these DSH plugins load on that harness version?
 usage:
   dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
   dshfit profile --host <version> [--json] <listing.json|->
+  dshfit diff --from <version> --to <version> [--json] <listing.json|->
   dshfit version
   dshfit help
 
@@ -37,8 +38,22 @@ profile evaluates a whole profile at once and groups the failures by root cause:
 A package with no dsh.bundle.patch is reported as "not a plugin" rather than
 blocked: in a profile that is what data and tooling packages look like.
 
+diff answers the third question: you run A, you are considering B, what changes?
+
+  dshfit diff --from 0.2.1-rc.3 --to 0.2.2-rc.1 listing.json
+
+Only packages that differ are printed. A plugin blocked on both hosts is not a
+difference; the same plugin blocked for a different reason is — the verdict
+looks identical and the fix is the opposite. Both --from and --to are required,
+because a default on either side would answer for a version nobody named.
+
 flags for check and profile:
   --host <version>   harness version to test against, e.g. 0.2.0-rc.2 (required)
+  --json             emit machine-readable output instead of text
+
+flags for diff:
+  --from <version>   harness version the profile runs on today (required)
+  --to <version>     harness version being considered (required)
   --json             emit machine-readable output instead of text
 `
 
@@ -63,6 +78,8 @@ func Run(in io.Reader, args []string, out, errOut io.Writer) int {
 		return runCheck(args[1:], out, errOut)
 	case "profile":
 		return runProfile(in, args[1:], out, errOut)
+	case "diff":
+		return runDiff(in, args[1:], out, errOut)
 	case "version", "--version", "-v":
 		if _, err := fmt.Fprintln(out, version.String()); err != nil {
 			return 2

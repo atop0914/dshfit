@@ -32,27 +32,9 @@ func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
-	src := in
-	from := "stdin"
-	base := ""
-	if rest[0] != "-" {
-		f, err := os.Open(rest[0])
-		if err != nil {
-			warnf(errOut, "profile: read listing: %v\n", err)
-			return 2
-		}
-		defer func() { _ = f.Close() }()
-		src = f
-		from = rest[0]
-		// Relative package paths in a listing are relative to the listing.
-		if abs, err := filepath.Abs(rest[0]); err == nil {
-			base = filepath.Dir(abs)
-		}
-	}
-
-	projects, err := profile.Parse(src)
+	projects, base, err := readListing(in, rest[0], "profile")
 	if err != nil {
-		warnf(errOut, "profile: %s: %v\n", from, err)
+		warnf(errOut, "%v\n", err)
 		return 2
 	}
 	res, err := profile.Assess(projects, *host, base)
@@ -80,6 +62,39 @@ func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// readListing turns the command's single argument into parsed projects plus the
+// directory relative package paths resolve against.
+//
+// It is shared by profile and diff so the two commands cannot disagree about
+// what a listing argument means: `-` is stdin, a path is a file whose directory
+// becomes the base. The command name is a parameter because it prefixes every
+// diagnostic — a message that names the wrong subcommand sends the reader to
+// the wrong usage.
+func readListing(in io.Reader, arg, cmd string) ([]profile.Project, string, error) {
+	if arg == "-" {
+		projects, err := profile.Parse(in)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: stdin: %w", cmd, err)
+		}
+		return projects, "", nil
+	}
+	f, err := os.Open(arg)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: read listing: %w", cmd, err)
+	}
+	defer func() { _ = f.Close() }()
+	base := ""
+	// Relative package paths in a listing are relative to the listing.
+	if abs, err := filepath.Abs(arg); err == nil {
+		base = filepath.Dir(abs)
+	}
+	projects, err := profile.Parse(f)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %s: %w", cmd, arg, err)
+	}
+	return projects, base, nil
 }
 
 func writeProfileText(w io.Writer, res profile.Result) error {

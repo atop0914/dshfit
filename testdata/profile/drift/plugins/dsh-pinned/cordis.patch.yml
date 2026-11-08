@@ -1,0 +1,4 @@
+# Synthetic fixture for diff mode.
+- insert:
+    - id: dsh-pinned
+      name: dsh-pinned

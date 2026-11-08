@@ -1,0 +1,14 @@
+{
+  "name": "dsh-stable",
+  "version": "1.0.0",
+  "description": "Synthetic fixture for diff mode: refused by the prerelease gate on both hosts, so it must not appear in a diff between them.",
+  "files": ["lib", "cordis.patch.yml"],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": ">=0.2.0-rc.1 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

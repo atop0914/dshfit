@@ -1,0 +1,28 @@
+[
+  {
+    "name": "drift",
+    "version": "0.0.0",
+    "path": ".",
+    "private": true,
+    "dependencies": {
+      "dsh-pinned": {
+        "from": "dsh-pinned",
+        "version": "1.0.0",
+        "resolved": "https://registry.npmjs.org/dsh-pinned/-/dsh-pinned-1.0.0.tgz",
+        "path": "./plugins/dsh-pinned"
+      },
+      "dsh-ships": {
+        "from": "dsh-ships",
+        "version": "1.0.0",
+        "resolved": "https://registry.npmjs.org/dsh-ships/-/dsh-ships-1.0.0.tgz",
+        "path": "./plugins/dsh-ships"
+      },
+      "dsh-stable": {
+        "from": "dsh-stable",
+        "version": "1.0.0",
+        "resolved": "https://registry.npmjs.org/dsh-stable/-/dsh-stable-1.0.0.tgz",
+        "path": "./plugins/dsh-stable"
+      }
+    }
+  }
+]
