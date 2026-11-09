@@ -20,6 +20,7 @@ usage:
   dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
   dshfit profile --host <version> [--json] <listing.json|->
   dshfit diff --from <version> --to <version> [--json] <listing.json|->
+  dshfit serve
   dshfit version
   dshfit help
 
@@ -55,6 +56,19 @@ flags for diff:
   --from <version>   harness version the profile runs on today (required)
   --to <version>     harness version being considered (required)
   --json             emit machine-readable output instead of text
+
+serve is the same three answers over a pipe, for an editor panel that cannot run
+a terminal command and parse a human report. It reads one JSON request per line
+on stdin and writes one JSON response per line on stdout, nothing else:
+
+  {"id":1,"method":"profile","params":{"host":"0.2.2-rc.1","listing":"list.json"}}
+
+methods: profile {host, listing, base?}, diff {from, to, listing, base?},
+version {}. The listing field is the listing text itself or a path to it; a bare
+hyphen is refused because stdin carries requests. Responses may arrive out of
+order — pair them by the id they echo. A malformed line is answered with an error
+and does not end the session, and a verdict of blocked is still exit 0: the exit
+code of a long-lived process cannot carry a per-request answer.
 `
 
 // warnf writes a diagnostic to stderr and deliberately ignores the write error.
@@ -80,6 +94,8 @@ func Run(in io.Reader, args []string, out, errOut io.Writer) int {
 		return runProfile(in, args[1:], out, errOut)
 	case "diff":
 		return runDiff(in, args[1:], out, errOut)
+	case "serve":
+		return runServe(in, args[1:], out, errOut)
 	case "version", "--version", "-v":
 		if _, err := fmt.Fprintln(out, version.String()); err != nil {
 			return 2

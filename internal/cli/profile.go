@@ -5,8 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/atop0914/dshfit/internal/compat"
@@ -80,19 +78,11 @@ func readListing(in io.Reader, arg, cmd string) ([]profile.Project, string, erro
 		}
 		return projects, "", nil
 	}
-	f, err := os.Open(arg)
+	// Relative package paths in a listing are relative to the listing, and that
+	// rule lives in one place so the sidecar cannot answer it differently.
+	projects, base, err := profile.LoadListing(arg)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: read listing: %w", cmd, err)
-	}
-	defer func() { _ = f.Close() }()
-	base := ""
-	// Relative package paths in a listing are relative to the listing.
-	if abs, err := filepath.Abs(arg); err == nil {
-		base = filepath.Dir(abs)
-	}
-	projects, err := profile.Parse(f)
-	if err != nil {
-		return nil, "", fmt.Errorf("%s: %s: %w", cmd, arg, err)
+		return nil, "", fmt.Errorf("%s: %w", cmd, err)
 	}
 	return projects, base, nil
 }

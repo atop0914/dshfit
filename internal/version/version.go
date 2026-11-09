@@ -40,6 +40,14 @@ func resolve() (v, commit, date string) {
 	return v, commit, date
 }
 
+// Value is the bare build identity: the version alone, without the commit and
+// date String adds for a human reading a terminal line. A machine-readable
+// field should not need to be parsed back out of a formatted sentence.
+func Value() string {
+	v, _, _ := resolve()
+	return v
+}
+
 // String renders the identity, omitting fields that are genuinely unknown
 // rather than printing placeholders for them. A commit already contained in the
 // version string (git describe --always) is not repeated.
