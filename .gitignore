@@ -5,3 +5,11 @@ bin/
 # Container-side Go build cache (mounted as .cache/gocache). 384 MB of it; a
 # stray "git add -A" must never pick it up.
 /.cache/
+
+# The panel's toolchain output. `lib/` is compiled from `src/` by `npm run
+# build` and is deliberately not committed: it is generated JavaScript of the
+# source next to it, and a committed copy goes stale the first time someone
+# edits `src/` without rebuilding. `node_modules/` is not committed either, so
+# the build step is stated in the plugin's README instead of assumed.
+/plugins/dshfit-panel/node_modules/
+/plugins/dshfit-panel/lib/

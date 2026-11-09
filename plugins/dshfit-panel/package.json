@@ -1,0 +1,31 @@
+{
+  "name": "dshfit-panel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sidebar panel that runs the dshfit sidecar and shows which plugins will stop loading",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/index.js",
+    "lib/index.d.ts",
+    "lib/protocol.js",
+    "lib/sidecar.js",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run typecheck && npm run build && node test/sidecar.smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
