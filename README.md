@@ -222,6 +222,51 @@ with a blocked or unjudged package on B is `1`. Packages that are only in the
 source listing never fail the run — they are gone after the upgrade.
 
 
+### Panel sidecar
+
+A panel inside DSH cannot run a terminal command and parse a report. `serve`
+gives it the same three answers over a pipe: one JSON request per line on stdin,
+one JSON response per line on stdout, nothing else.
+
+```console
+$ echo '{"id":1,"method":"profile","params":{"host":"0.2.2-rc.1","listing":"list.json"}}' | dshfit serve
+{"id":1,"result":{"host":"0.2.2-rc.1","projects":["web"],"entries":[...],"groups":[...],"counts":{...}}}
+```
+
+| method | params | result |
+|---|---|---|
+| `profile` | `host`, `listing`, `base`? | a `profile` result, as `profile --json` |
+| `diff` | `from`, `to`, `listing`, `base`? | a `diff` result, as `diff --json` |
+| `version` | — | `name`, `version`, `protocol` |
+
+`listing` is the listing text itself or a path to one. A bare `-` is refused:
+stdin carries requests here, so "read the listing from stdin" would consume the
+protocol stream. `base` is the directory relative package paths in an inline
+listing resolve against; a path already answers that question and ignores `base`.
+
+Four rules the caller can rely on, each of which is the difference between a
+panel and a wrapper that looks like one:
+
+- **A bad line is answered, not fatal.** A malformed request, an unknown method,
+  or an unparseable host gets `{"id":N,"error":{"code":"...","message":"..."}}`
+  and the session continues. `code` is one of `bad-request`, `unknown-method`,
+  `invalid-input`, `internal` — an unknown method is never an empty result,
+  because an empty result and "asked, nothing wrong" are the same bytes.
+- **Responses pair by id, not by order.** Requests are judged concurrently, so a
+  response may arrive in any order; the id it echoes is the only pairing key.
+  Lines never interleave: one writer owns stdout. A request with no id is
+  rejected, since its response could never be matched.
+- **Diagnostics go to stderr.** Nothing but protocol is written to stdout, so a
+  `println` cannot corrupt the stream a client is parsing.
+- **Blocked is still exit 0.** The verdicts belong to individual responses; the
+  exit code of a long-lived process has no single answer to carry. Only a broken
+  stdout exits non-zero, because then nothing can be reported at all.
+
+Requests are capped at 8 MiB per line. An over-long line is discarded to its
+newline and answered with an error, so the session stays on a request boundary —
+send big listings as a path instead.
+
+
 ## Install
 
 Zero runtime dependencies, single static binary:
@@ -236,6 +281,7 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 $ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
 $ dshfit profile --host <version> [--json] <listing.json|->
 $ dshfit diff --from <version> --to <version> [--json] <listing.json|->
+$ dshfit serve
 $ dshfit version
 ```
 

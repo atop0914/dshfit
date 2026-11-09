@@ -305,6 +305,46 @@ Three further decisions are worth recording because they are easy to get wrong:
   health question, since "no differences" alone reads like a clean bill.
 
 
+## Why the protocol repeats no judgement
+
+`serve` serializes `profile.Result` and `profile.Diff` as they are. It has no
+rules of its own, and that is deliberate: a panel that re-derived verdicts from
+raw manifests would eventually disagree with `dshfit profile` on the same file,
+and there would be no way to tell which of the two answers was the product.
+Two judges in one tool is the failure mode this repository has avoided since the
+diff command, and the protocol is where the temptation is strongest — a panel
+needs "just a count" and it is easy to compute one on the spot.
+
+The protocol's own rules are all about the channel, not the answer:
+
+- **stdout is protocol, stderr is diagnostics.** A stray debug print on stdout
+  does not produce a wrong answer, it produces an unparseable stream — and a
+  client that fails to parse a response cannot tell that from a slow sidecar.
+- **An error carries an id.** A response that cannot be paired with its request
+  is a response the client will wait for forever. Where the id was unreadable
+  (a line that is not JSON at all) the response carries `null` rather than a
+  guess: "unpairable" is honest, an invented id is not.
+- **A bad line does not end the session.** One malformed request is a client
+  bug, and turning it into a dead panel makes a typo look like a crash.
+- **The line cap discards the line, not the session.** `bufio.Scanner` cannot
+  express this: an over-long line makes it stop scanning for good. Reading with
+  `ReadSlice` and draining to the next newline keeps the stream on a request
+  boundary, which is why there is a test that sends a huge request and then
+  expects the *next* request to be answered normally.
+- **One writer owns the output.** Concurrent handlers write to a channel, not to
+  the file: two responses interleaved into one line would produce a stream that
+  parses fine until it does not.
+- **`-` is refused.** In the CLI it means stdin; here stdin is the request
+  channel, so accepting it would make the sidecar read its own protocol as a
+  listing and deadlock.
+
+The exit code is the one place where a per-request answer is deliberately not
+carried: `serve` exits `0` for a clean EOF even when every plugin in the listing
+is blocked. A long-lived process has no single verdict to put there, and a
+client that reads the exit code instead of the responses would report the last
+request's outcome for all of them. Only a broken stdout exits non-zero, because
+then there is nowhere left to say anything.
+
 ## Next
 
 1. Registry lookup: the solver now produces the smallest edit to a *range*; the
@@ -312,6 +352,8 @@ Three further decisions are worth recording because they are easy to get wrong:
    that admits the host, which needs `npm view` and a cache. The two answers are
    different — "write this" versus "install that" — and must not be conflated.
 2. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
-   the matrix is visible where people actually upgrade.
+   the matrix is visible where people actually upgrade. The protocol half exists
+   (`dshfit serve`); the panel half is still being written, and it renders what
+   the sidecar returns rather than deciding anything itself.
 3. CI mode: the same matrix as a GitHub Action comment, gated on the exit code
    the commands already define.
