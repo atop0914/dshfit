@@ -9,7 +9,7 @@ import { test } from 'node:test'
 
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { PanelFace, SEAT, unavailableLoader } from '../lib/client.js'
+import { apply, PanelFace, SEAT, unavailableLoader } from '../lib/client.js'
 
 /** counts builds a self-consistent count block. */
 function counts(over = {}) {
@@ -91,4 +91,47 @@ test('the default loader fails with a code instead of inventing an empty profile
     (err) => err.code === 'no-transport' && /no Remote endpoint/.test(err.message),
   )
   assert.equal(SEAT, 'sidebar.footer.action', 'the seat name is the client\'s, not ours')
+})
+
+test('apply registers exactly one seat, with the config it was given', () => {
+  const calls = []
+  const ctx = {
+    slots: {
+      inject(name, register) {
+        calls.push({ kind: 'inject', name })
+        register()
+      },
+      register(descriptor, component) {
+        calls.push({ kind: 'register', descriptor, component })
+      },
+    },
+  }
+
+  apply(ctx, { host: '0.2.2-rc.1', listing: 'list.json' })
+
+  assert.deepEqual(calls.map((c) => c.kind), ['inject', 'register'], 'inject first, then register inside it')
+  assert.equal(calls[0].name, SEAT)
+  assert.equal(calls[1].descriptor.name, SEAT, 'the descriptor must name the seat it is injected into')
+  assert.equal(calls[1].descriptor.id, 'dshfit-panel')
+  assert.equal(typeof calls[1].component, 'function')
+
+  const face = calls[1].descriptor.inject()
+  assert.equal(face.host, '0.2.2-rc.1')
+  assert.equal(face.listing, 'list.json')
+  assert.equal(face.load, unavailableLoader, 'no loader configured means the honest failure, not a stub')
+})
+
+test('a Context without slots is reported, not silently skipped', () => {
+  const written = []
+  const original = process.stderr.write
+  process.stderr.write = (chunk) => {
+    written.push(String(chunk))
+    return true
+  }
+  try {
+    assert.doesNotThrow(() => apply({}, {}), 'throwing here would take down a healthy Context')
+  } finally {
+    process.stderr.write = original
+  }
+  assert.match(written.join(''), /no slots service/, 'a panel that never mounted must say so somewhere')
 })

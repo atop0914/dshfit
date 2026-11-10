@@ -32,3 +32,7 @@ run "M3 unknown-dropped-from-tone"
 
 echo "--- restored? ---"
 git status --short
+# Rebuild after the last mutant: `git checkout -- src` restores the sources but
+# leaves lib/ holding whatever the last mutant compiled, and a later `node --test`
+# without a build would be testing the mutant.
+npm run build >/dev/null 2>&1 && echo "lib rebuilt from restored sources"
