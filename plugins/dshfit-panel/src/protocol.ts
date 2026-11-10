@@ -149,8 +149,15 @@ export interface VersionInfo {
   protocol: number
 }
 
-/** Stable error codes the sidecar reports. */
-export type ErrorCode = 'bad-request' | 'unknown-method' | 'invalid-input' | 'internal'
+/**
+ * Stable error codes the panel reports.
+ *
+ * `no-transport` is ours, not the sidecar's: it means the browser half has no
+ * route to the host process yet. It is a code rather than a thrown string because
+ * a panel that cannot tell "the wire is missing" from "the profile said nothing"
+ * will show the second when it means the first.
+ */
+export type ErrorCode = 'bad-request' | 'unknown-method' | 'invalid-input' | 'internal' | 'no-transport'
 
 /** SidecarError is a failure the sidecar reported about one request. */
 export class SidecarError extends Error {
