@@ -291,3 +291,87 @@ func TestProfileMissingFileExitsTwo(t *testing.T) {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
+
+// cleanFixture is the other half of the contract: a profile where nothing drops
+// and nothing is unread. CI needs both halves, or the gate only ever proves that
+// the tool can complain.
+func cleanFixture() string {
+	return filepath.Join("..", "..", "testdata", "profile", "clean", "list.json")
+}
+
+// TestProfileFormatMarkdownKeepsTheExitCode: the format changes the rendering,
+// never the verdict. A markdown run that exited 0 on a blocked profile would let
+// a CI job pass while the step summary says two plugins will not load.
+func TestProfileFormatMarkdownKeepsTheExitCode(t *testing.T) {
+	code, stdout, stderr := run(t, "profile", "--host", "0.2.2-rc.1", "--format", "markdown", profileFixture())
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr=%s", code, stderr)
+	}
+	for _, want := range []string{
+		"### dshfit · host `0.2.2-rc.1`",
+		"will not load on",
+		"#### Blocked —",
+		"#### Could not be judged — 1 package(s)",
+		"| cause | range | plugins | rejects | smallest fix |",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("markdown is missing %q\n---\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "blocked by root cause") {
+		t.Errorf("--format markdown fell back to the text renderer:\n%s", stdout)
+	}
+}
+
+// TestProfileFormatMarkdownCleanExitsZero is the reverse case. A gate that fails
+// on a clean profile gets switched off, so exit 0 here is a feature.
+func TestProfileFormatMarkdownCleanExitsZero(t *testing.T) {
+	code, stdout, stderr := run(t, "profile", "--host", "0.3.0", "--format", "markdown", cleanFixture())
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr=%s\n%s", code, stderr, stdout)
+	}
+	if !strings.Contains(stdout, "Nothing to fix on `0.3.0`: all 1 plugin(s) load.") {
+		t.Errorf("clean markdown does not say so plainly:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "will not load") {
+		t.Errorf("clean markdown predicts a break:\n%s", stdout)
+	}
+}
+
+// TestProfileFormatRejectsUnknownAndContradiction pins both usage errors to
+// exit 2. CI tells "the plugins are blocked" from "the job is misconfigured" by
+// that number alone.
+func TestProfileFormatRejectsUnknownAndContradiction(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"profile", "--host", "0.2.2-rc.1", "--format", "yaml", profileFixture()}, "unknown --format"},
+		{[]string{"profile", "--host", "0.2.2-rc.1", "--json", "--format", "markdown", profileFixture()}, "different formats"},
+	}
+	for _, c := range cases {
+		code, stdout, stderr := run(t, c.args...)
+		if code != 2 {
+			t.Fatalf("%v: code = %d, want 2", c.args, code)
+		}
+		if stdout != "" {
+			t.Errorf("%v: a usage error printed a report:\n%s", c.args, stdout)
+		}
+		if !strings.Contains(stderr, c.want) {
+			t.Errorf("%v: stderr = %q, want %q", c.args, stderr, c.want)
+		}
+	}
+}
+
+// TestProfileFormatJSONIsUnchanged keeps the flag that predates --format working
+// byte for byte, because every existing script uses it.
+func TestProfileFormatJSONIsUnchanged(t *testing.T) {
+	_, viaFlag, _ := run(t, "profile", "--host", "0.2.2-rc.1", "--json", profileFixture())
+	_, viaFormat, _ := run(t, "profile", "--host", "0.2.2-rc.1", "--format", "json", profileFixture())
+	if viaFlag != viaFormat {
+		t.Errorf("--json and --format json disagree:\n%s\n---\n%s", viaFlag, viaFormat)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(viaFlag), "{") {
+		t.Errorf("--json is not JSON:\n%s", viaFlag)
+	}
+}

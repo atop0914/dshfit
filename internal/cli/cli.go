@@ -18,7 +18,7 @@ const usage = `dshfit — will these DSH plugins load on that harness version?
 
 usage:
   dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
-  dshfit profile --host <version> [--json] <listing.json|->
+  dshfit profile --host <version> [--json|--format text|markdown] <listing.json|->
   dshfit diff --from <version> --to <version> [--json] <listing.json|->
   dshfit serve
   dshfit version
@@ -51,6 +51,13 @@ because a default on either side would answer for a version nobody named.
 flags for check and profile:
   --host <version>   harness version to test against, e.g. 0.2.0-rc.2 (required)
   --json             emit machine-readable output instead of text
+
+flags for profile only:
+  --format <fmt>     text (default), markdown or json. markdown is for a CI step
+                     summary: a headline, one table per root cause with the
+                     smallest edit, and the packages that could not be read kept
+                     in their own section. --json and --format cannot disagree;
+                     passing both with different values exits 2.
 
 flags for diff:
   --from <version>   harness version the profile runs on today (required)
