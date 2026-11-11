@@ -279,11 +279,19 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 
 ```console
 $ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
-$ dshfit profile --host <version> [--json] <listing.json|->
+$ dshfit profile --host <version> [--json|--format text|markdown] <listing.json|->
 $ dshfit diff --from <version> --to <version> [--json] <listing.json|->
 $ dshfit serve
 $ dshfit version
 ```
+
+`--format markdown` is the same answer, laid out for a CI step summary: a
+one-line conclusion, one table row per root cause with the smallest edit that
+fixes it, the packages that could not be read in their own table, and the
+plugins that were verified clean. Every number in it comes from `counts` and
+every cause from `groups`, so it cannot disagree with the terminal output.
+`--json` and `--format` asking for different things exits 2 rather than letting
+one win silently.
 
 `--json` emits an array of reports (`plugin`, `version`, `dir`, `source`, `host`,
 `verdict`, `issues[]`) for scripting. `dir` is whatever you passed — a directory
@@ -299,6 +307,66 @@ Two runs over the same pair produce byte-identical JSON.
 An unreadable input becomes a `manifest-unreadable` report instead of aborting
 the run: a profile with one broken checkout (or one truncated `.tgz`) still gets
 verdicts for everything else.
+
+## CI
+
+The panel answers "will this drop when I upgrade". CI answers the other
+question: *did someone change a range and nobody noticed*. A compatibility
+regression caught before merge never reaches a user's machine.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-go@v5
+  with: { go-version: "1.25", cache: false }
+- run: go build ./cmd/dshfit
+- name: Would this profile survive the upgrade?
+  run: |
+    dshfit profile --host 0.3.0 --format markdown list.json >> "$GITHUB_STEP_SUMMARY"
+```
+
+The exit code is the contract, and it has three values because two of them mean
+different things to a person reading a red cross:
+
+| code | meaning | what a job should do |
+|---|---|---|
+| 0 | nothing blocked, nothing unread | pass |
+| 1 | a plugin will not load, **or** a package could not be judged | show the report; a verdict was reached |
+| 2 | usage or configuration error | fail loudly — no verdict was reached |
+
+Collapsing 1 and 2 into one failure sends whoever reads the job to the wrong
+place: they look for a range problem when the real problem is a typo in `--host`.
+
+**Why a step summary and not a PR comment.** On a pull request from a fork the
+`GITHUB_TOKEN` is read-only, so posting a comment needs write access the
+workflow does not have and returns `403`. A job that goes red on a permission
+error looks like the tool is broken, and the usual response to a gate that
+looks broken is to switch it off. `$GITHUB_STEP_SUMMARY` needs no token and
+shows the same markdown on the run page.
+
+**Gate on the verdict, not just the exit code.** `scripts/ci-profile-matrix.sh`
+runs the fixture matrix (a clean profile, a drifting one, and a real-world
+snapshot, each against two harness versions), writes the markdown to the step
+summary, and fails when the counts contradict the table inside the script. A
+blocked plugin is the *expected* answer for those fixtures — the job fails on a
+count that moved, not on the fact that something is blocked, because a gate that
+is red on every run is a gate nobody reads. It requires `jq` (present on GitHub
+runners); the table is a measured fact about the fixtures, so when a change is
+meant to move one, that row moves in the same commit.
+
+### pre-commit
+
+Same command, run before the commit instead of after the push:
+
+```console
+$ dsh plugin --profile web list --json > .dshfit-listing.json   # once
+$ DSHFIT_HOST=0.3.0 sh scripts/pre-commit.sh                    # 0 ok, 1 blocked, 2 misconfigured
+$ git config core.hooksPath .githooks && ln -s ../../scripts/pre-commit.sh .githooks/pre-commit
+```
+
+The script prints the same report and the smallest edit, and **does not install
+itself** — writing into `.git/hooks` is a change to your repository, so it is
+yours to make. When it exits 1 it says so and names the escape hatch
+(`--no-verify`); a hook that blocks silently teaches people to bypass it.
 
 ## Scope and honesty
 
