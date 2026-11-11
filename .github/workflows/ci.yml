@@ -15,9 +15,9 @@ jobs:
           go-version: "1.25"
           cache: false
       - name: Format
-        run: |
-          out=$(gofmt -s -l $(find . -name '*.go' -not -path './bin/*'))
-          if [ -n "$out" ]; then echo "UNFORMATTED:"; echo "$out"; exit 1; fi
+        # The rule lives in the Makefile and nowhere else: a second copy here is
+        # a second definition of "formatted", and the two drift.
+        run: make fmt-check
       - name: Vet
         run: go vet ./...
       - name: Test (no skips)
@@ -59,3 +59,30 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
+
+  # The panel answers "will this drop when I upgrade". This job answers the other
+  # question: "did someone change a range and nobody noticed". A compatibility
+  # regression caught here never reaches a user's machine, which is the only way
+  # this tool scales past the people who remember to run it.
+  profile-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Build
+        run: make build
+      - name: Fixture matrix
+        # Writes the markdown to $GITHUB_STEP_SUMMARY, never to a PR comment: on a
+        # fork PR GITHUB_TOKEN is read-only and a comment would 403, which reads
+        # as "the tool is broken" rather than "you are not allowed to comment".
+        #
+        # This step fails on exit 2 (usage error), on a crash, or on a count that
+        # contradicts the table in the script. It does not fail because a plugin
+        # is blocked: for these fixtures that is the expected answer, and a gate
+        # that is red on every run is a gate nobody reads.
+        run: sh scripts/ci-profile-matrix.sh
