@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atop0914/dshfit/internal/compat"
 	"github.com/atop0914/dshfit/internal/profile"
 	"github.com/atop0914/dshfit/internal/registry"
 )
@@ -323,13 +324,7 @@ func writeRegistryAnswer(b *strings.Builder, a profile.RegistryAnswer) {
 			"moving the pin forward is the fix\n")
 	} else {
 		fmt.Fprintf(b, "  %s  latest %s does not admit %s\n", a.Package, a.Latest, a.Host)
-		for _, r := range a.LatestRejections {
-			reason := r.Reason
-			if reason == "" {
-				reason = "unparseable range"
-			}
-			fmt.Fprintf(b, "    rejects: %s %s (%s)\n", r.Package, r.Range, reason)
-		}
+		writeRejections(b, a.LatestRejections)
 		if len(a.Admitting) > 0 {
 			fmt.Fprintf(b, "    published release(s) that do admit %s: %s\n",
 				a.Host, strings.Join(a.Admitting, ", "))
@@ -354,5 +349,43 @@ func writeRegistryAnswer(b *strings.Builder, a profile.RegistryAnswer) {
 	}
 	if a.Unparseable > 0 {
 		fmt.Fprintf(b, "    %d published version(s) are not semver and were not compared\n", a.Unparseable)
+	}
+}
+
+// writeRejections prints the peer ranges that refuse the host, folded by range
+// and reason.
+//
+// The fold is the same decision the root-cause grouping makes: dsh-pet@0.4.8
+// refuses the 0.2.2 line through nine peers that all declare `^0.2.0-rc.1`, and
+// nine identical lines read as nine problems. The names are still printed (a
+// reader wants to know which peer), capped so a pathological package cannot
+// push the summary off the screen; the full list stays in --json.
+func writeRejections(b *strings.Builder, rejections []compat.PeerRejection) {
+	type key struct{ rng, reason string }
+	var order []key
+	counts := map[key]int{}
+	names := map[key][]string{}
+	for _, r := range rejections {
+		k := key{r.Range, r.Reason}
+		if counts[k] == 0 {
+			order = append(order, k)
+		}
+		counts[k]++
+		names[k] = append(names[k], r.Package)
+	}
+	const maxNames = 3
+	for _, k := range order {
+		reason := k.reason
+		if reason == "" {
+			reason = "unparseable range"
+		}
+		who := names[k]
+		suffix := ""
+		if len(who) > maxNames {
+			suffix = fmt.Sprintf(", and %d more", len(who)-maxNames)
+			who = who[:maxNames]
+		}
+		fmt.Fprintf(b, "    rejects %d peer(s) declaring %s (%s): %s%s\n",
+			counts[k], k.rng, reason, strings.Join(who, ", "), suffix)
 	}
 }

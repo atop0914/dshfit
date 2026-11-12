@@ -235,3 +235,38 @@ func TestProfileRejectsBadRegistryURL(t *testing.T) {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
+
+// TestProfileRegistryFoldsRepeatedRejections is the same lesson the root-cause
+// grouping already learned: nine peers declaring one range is one problem, not
+// nine lines. dsh-pet@0.4.8 really is shaped like this.
+func TestProfileRegistryFoldsRepeatedRejections(t *testing.T) {
+	var peers strings.Builder
+	names := []string{"agent-default-model", "commands", "llm", "host-webserver", "credentials"}
+	for i, n := range names {
+		if i > 0 {
+			peers.WriteString(",")
+		}
+		peers.WriteString(`"@deepseek-ai/dsh-` + n + `": "^9.0.0"`)
+	}
+	body := `{"dist-tags":{"latest":"9.9.9"},"versions":{"9.9.9":{"version":"9.9.9",
+	  "peerDependencies":{` + peers.String() + `}}}}`
+	srv, _ := registryServer(t, 200, body)
+	plugins := blockedCount(t)
+
+	code, stdout, _ := run(t, "profile", "--host", "0.2.2-rc.1", "--registry",
+		"--registry-url", srv.URL, "--cache-dir", t.TempDir(), driftFixture())
+	if code != 1 {
+		t.Fatalf("code = %d", code)
+	}
+	// Names are sorted, so the three shown are the alphabetically first — the
+	// fold must not reorder by anything else, or the same data would print
+	// differently between runs.
+	line := "rejects 5 peer(s) declaring ^9.0.0 (out-of-range): @deepseek-ai/dsh-agent-default-model, " +
+		"@deepseek-ai/dsh-commands, @deepseek-ai/dsh-credentials, and 2 more"
+	if !strings.Contains(stdout, line) {
+		t.Errorf("stdout should fold the five identical rejections into one line:\n%s", stdout)
+	}
+	if n := strings.Count(stdout, "declaring ^9.0.0"); n != plugins {
+		t.Errorf("^9.0.0 appears %d time(s), want %d (once per looked-up plugin)", n, plugins)
+	}
+}
