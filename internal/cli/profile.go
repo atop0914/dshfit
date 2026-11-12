@@ -279,7 +279,7 @@ func registryClient(baseURL, cacheDir string, ttl time.Duration, offline bool) (
 	if dir == "" {
 		root, err := os.UserCacheDir()
 		if err != nil {
-			return nil, fmt.Errorf("cannot locate a cache directory (%v); pass --cache-dir", err)
+			return nil, fmt.Errorf("cannot locate a cache directory (%w); pass --cache-dir", err)
 		}
 		dir = filepath.Join(root, "dshfit", "registry")
 	}

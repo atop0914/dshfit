@@ -206,7 +206,7 @@ func (c *Client) Lookup(ctx context.Context, pkg, host string) (Snapshot, error)
 		// A corrupt cache entry is not a reason to stop: it is a reason to
 		// refetch. The error is kept so an offline run can explain itself.
 		if c.opts.Offline {
-			return Snapshot{}, fmt.Errorf("%w for %q, and the cached copy is unreadable: %v", ErrNoCache, pkg, err)
+			return Snapshot{}, fmt.Errorf("%w for %q, and the cached copy is unreadable: %w", ErrNoCache, pkg, err)
 		}
 	} else if rec != nil {
 		if fresh(rec.FetchedAt, now, c.ttl()) {
