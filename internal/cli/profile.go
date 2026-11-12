@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/atop0914/dshfit/internal/profile"
+	"github.com/atop0914/dshfit/internal/registry"
 )
 
 func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
@@ -16,6 +21,15 @@ func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
 	host := fs.String("host", "", "harness version to test against")
 	asJSON := fs.Bool("json", false, "emit JSON (same as --format json)")
 	format := fs.String("format", "", "output format: text, markdown or json (default text)")
+	// Registry access is opt-in. A tool whose job is assessing an upgrade
+	// before you perform it must not open a network connection because someone
+	// ran it to look at a local profile.
+	useRegistry := fs.Bool("registry", false, "ask the npm registry which published releases accept the host")
+	offline := fs.Bool("offline", false, "use cached registry data only; never touch the network (implies --registry)")
+	cacheDir := fs.String("cache-dir", "", "registry cache directory (default: <user cache>/dshfit/registry)")
+	cacheTTL := fs.Duration("cache-ttl", registry.DefaultTTL,
+		"how long cached registry data counts as current; 0 keeps the default, a negative value refetches every run")
+	registryURL := fs.String("registry-url", registry.DefaultBaseURL, "registry base URL")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -46,6 +60,18 @@ func runProfile(in io.Reader, args []string, out, errOut io.Writer) int {
 	if err != nil {
 		warnf(errOut, "profile: %v\n", err)
 		return 2
+	}
+
+	// The registry view is added after the local verdict, and it can only add
+	// sentences: it never rewrites Status, Verdict or Counts, so the exit code
+	// still means "will this profile load", not "did the network work".
+	if *useRegistry || *offline {
+		client, err := registryClient(*registryURL, *cacheDir, *cacheTTL, *offline)
+		if err != nil {
+			warnf(errOut, "profile: %v\n", err)
+			return 2
+		}
+		profile.AnnotateRegistry(context.Background(), &res, client.Lookup)
 	}
 
 	var werr error
@@ -133,6 +159,7 @@ func writeProfileText(w io.Writer, res profile.Result) error {
 			len(blocked), profile.DistinctPluginCount(blocked))
 		writeGroups(&b, blocked)
 	}
+	writeRegistry(&b, res)
 	if len(warn) > 0 {
 		fmt.Fprintf(&b, "\nwarnings by root cause — %d cause(s), %d plugin(s)\n",
 			len(warn), profile.DistinctPluginCount(warn))
@@ -237,4 +264,95 @@ func versionSuffix(e profile.Entry) string {
 		return ""
 	}
 	return "@" + e.Version
+}
+
+// registryClient builds the registry client and resolves the default cache
+// directory.
+//
+// A cache location that cannot be determined is a usage error rather than a
+// silent no-cache run: every later --offline run would then fail for a reason
+// the user was never told about, and the tool would look like it had checked
+// the registry when it had not.
+func registryClient(baseURL, cacheDir string, ttl time.Duration, offline bool) (*registry.Client, error) {
+	dir := cacheDir
+	if dir == "" {
+		root, err := os.UserCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("cannot locate a cache directory (%v); pass --cache-dir", err)
+		}
+		dir = filepath.Join(root, "dshfit", "registry")
+	}
+	return registry.New(registry.Options{
+		BaseURL:  baseURL,
+		CacheDir: dir,
+		TTL:      ttl,
+		Offline:  offline,
+	})
+}
+
+// writeRegistry prints the second question — what the publisher ships — under
+// the root-cause block it belongs to. It prints nothing unless --registry was
+// given, so the default output stays a pure statement about the local profile.
+func writeRegistry(b *strings.Builder, res profile.Result) {
+	started := false
+	for _, e := range res.Entries {
+		if e.Registry == nil {
+			continue
+		}
+		if !started {
+			fmt.Fprintf(b, "\nregistry — releases the publisher ships\n")
+			started = true
+		}
+		writeRegistryAnswer(b, *e.Registry)
+	}
+}
+
+func writeRegistryAnswer(b *strings.Builder, a profile.RegistryAnswer) {
+	// An unreadable registry is printed as its own outcome. Folding it into
+	// "nothing newer works" would turn a network failure into a compatibility
+	// claim, which is the one thing this tool must not do.
+	if a.Error != "" {
+		fmt.Fprintf(b, "  %s  could not be checked: %s\n", a.Package, a.Error)
+		fmt.Fprintf(b, "    nothing here says whether a released version would load\n")
+		return
+	}
+
+	if a.LatestAdmits {
+		fmt.Fprintf(b, "  %s  latest %s admits %s\n", a.Package, a.Latest, a.Host)
+		fmt.Fprintf(b, "    a fresh install would get a newer release than the blocked one; "+
+			"moving the pin forward is the fix\n")
+	} else {
+		fmt.Fprintf(b, "  %s  latest %s does not admit %s\n", a.Package, a.Latest, a.Host)
+		for _, r := range a.LatestRejections {
+			reason := r.Reason
+			if reason == "" {
+				reason = "unparseable range"
+			}
+			fmt.Fprintf(b, "    rejects: %s %s (%s)\n", r.Package, r.Range, reason)
+		}
+		if len(a.Admitting) > 0 {
+			fmt.Fprintf(b, "    published release(s) that do admit %s: %s\n",
+				a.Host, strings.Join(a.Admitting, ", "))
+		} else {
+			fmt.Fprintf(b, "    no published version admits %s, out of %d checked\n", a.Host, a.Published)
+		}
+	}
+
+	fmt.Fprintf(b, "    data as of %s", a.AsOf.UTC().Format(time.RFC3339))
+	switch {
+	case a.Stale && a.RefreshError != "":
+		fmt.Fprintf(b, " (from cache; refresh failed: %s)\n", a.RefreshError)
+	case a.Stale:
+		fmt.Fprintf(b, " (from cache, offline)\n")
+	case a.From == registry.FromCache:
+		fmt.Fprintf(b, " (from cache)\n")
+	default:
+		fmt.Fprintf(b, " (from the registry)\n")
+	}
+	if a.CacheError != "" {
+		fmt.Fprintf(b, "    cache not written: %s\n", a.CacheError)
+	}
+	if a.Unparseable > 0 {
+		fmt.Fprintf(b, "    %d published version(s) are not semver and were not compared\n", a.Unparseable)
+	}
 }

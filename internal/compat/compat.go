@@ -12,6 +12,7 @@ package compat
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/atop0914/dshfit/internal/manifest"
@@ -243,18 +244,43 @@ func checkBundle(p *manifest.Plugin) []Issue {
 	return issues
 }
 
-func checkPeers(p *manifest.Plugin, host semver.Version) []Issue {
-	var issues []Issue
-	for _, name := range p.PeerNames() {
-		raw := p.Peers[name]
+// PeerRejection is one DSH peer range that does not accept a host version.
+type PeerRejection struct {
+	Package string `json:"package"`
+	Range   string `json:"range"`
+	// Reason is empty when the range itself cannot be parsed, which is a
+	// different problem from a range that parses and refuses the host.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail"`
+}
+
+// RejectingPeers reports every DSH peer range in peers that does not accept
+// host, in name order.
+//
+// This is the only implementation of that judgment, and it is exported on
+// purpose: a package checked from disk and the same package checked through the
+// registry must reach the same answer about `^0.2.0-rc.1` vs 0.2.2-rc.1. Two
+// copies of this logic would drift, and a report that says "your installed copy
+// is blocked but the published one is fine" for the same range is not a report
+// anyone can act on.
+func RejectingPeers(peers map[string]string, host semver.Version) []PeerRejection {
+	names := make([]string, 0, len(peers))
+	for name := range peers {
+		if manifest.IsDSHPackage(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	var out []PeerRejection
+	for _, name := range names {
+		raw := peers[name]
 		rng, err := semver.ParseRange(raw)
 		if err != nil {
-			issues = append(issues, Issue{
-				Severity: Block,
-				Code:     "unparseable-peer-range",
-				Package:  name,
-				Range:    raw,
-				Detail:   fmt.Sprintf("peer range %q cannot be parsed: %v", raw, err),
+			out = append(out, PeerRejection{
+				Package: name,
+				Range:   raw,
+				Detail:  fmt.Sprintf("peer range %q cannot be parsed: %v", raw, err),
 			})
 			continue
 		}
@@ -262,13 +288,32 @@ func checkPeers(p *manifest.Plugin, host semver.Version) []Issue {
 		if exp.Satisfied {
 			continue
 		}
+		out = append(out, PeerRejection{
+			Package: name,
+			Range:   raw,
+			Reason:  string(exp.Kind),
+			Detail:  exp.Detail,
+		})
+	}
+	return out
+}
+
+func checkPeers(p *manifest.Plugin, host semver.Version) []Issue {
+	var issues []Issue
+	for _, r := range RejectingPeers(p.Peers, host) {
+		code := "peer-range-excludes-host"
+		if r.Reason == "" {
+			// A range that does not parse is its own cause: no rewrite of the
+			// numbers fixes it, the syntax has to.
+			code = "unparseable-peer-range"
+		}
 		issues = append(issues, Issue{
 			Severity: Block,
-			Code:     "peer-range-excludes-host",
-			Package:  name,
-			Range:    raw,
-			Reason:   string(exp.Kind),
-			Detail:   exp.Detail,
+			Code:     code,
+			Package:  r.Package,
+			Range:    r.Range,
+			Reason:   r.Reason,
+			Detail:   r.Detail,
 		})
 	}
 	return issues

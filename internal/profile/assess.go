@@ -41,6 +41,11 @@ type Entry struct {
 	// is empty: the verdict and issues carry the explanation.
 	Reason string         `json:"reason,omitempty"`
 	Report *compat.Report `json:"report,omitempty"`
+	// Registry is filled only by AnnotateRegistry, only for blocked plugins,
+	// and only when the caller asked for it. It is a second question ("has the
+	// publisher shipped a release that works?") and never changes Status,
+	// Verdict or Counts.
+	Registry *RegistryAnswer `json:"registry,omitempty"`
 }
 
 // Group is one root cause, with every plugin it affects. Grouping is the point
