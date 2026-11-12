@@ -259,6 +259,20 @@ func TestCacheKeyIncludesHost(t *testing.T) {
 	if got := atomic.LoadInt32(hits); got != 2 {
 		t.Errorf("network hits = %d, want 2 (host is part of the cache key)", got)
 	}
+	// The key itself is checked, not just the behaviour: two hosts have to end
+	// up in two files. Without this the record-level validation would hide a
+	// key that ignores the host.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("cache dir: %v", err)
+	}
+	if len(entries) != 2 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("cache files = %v, want one per host", names)
+	}
 }
 
 func TestStaleCacheIsRefetched(t *testing.T) {
@@ -461,17 +475,31 @@ func TestCacheRecordForAnotherQuestionIsRejected(t *testing.T) {
 	if _, err := c.Lookup(context.Background(), "dsh-pet", "0.2.2-rc.1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := os.WriteFile(c.cachePath("dsh-pet", "0.2.2-rc.1"), []byte(`{
-	  "package": "dsh-pet", "host": "0.9.9", "registry": "https://registry.npmjs.org",
-	  "fetched_at": "2026-11-12T20:00:00Z",
-	  "packument": {"name":"dsh-pet","versions":[{"version":"0.0.1"}]}}`), 0o644); err != nil {
+	// The planted record is *fresh* and names the same mirror on purpose: with
+	// either of those wrong, the TTL or the mirror check would reject it and
+	// this test would pass even with the host check removed — which is exactly
+	// what a first version of this test did.
+	freshStamp := time.Now().UTC().Format(time.RFC3339)
+	planted := `{
+	  "package": "dsh-pet", "host": "0.9.9", "registry": "` + srv.URL + `",
+	  "fetched_at": "` + freshStamp + `",
+	  "packument": {"name":"dsh-pet","versions":[{"version":"0.0.1"}]}}`
+	if err := os.WriteFile(c.cachePath("dsh-pet", "0.2.2-rc.1"), []byte(planted), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Lookup(context.Background(), "dsh-pet", "0.2.2-rc.1"); err != nil {
+	snap, err := c.Lookup(context.Background(), "dsh-pet", "0.2.2-rc.1")
+	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
 	if got := atomic.LoadInt32(hits); got != 2 {
 		t.Errorf("network hits = %d, want 2 (a record for another host must not be served)", got)
+	}
+	if snap.From != FromNetwork {
+		t.Errorf("From = %q, want a fresh fetch", snap.From)
+	}
+	// If the planted copy had been served, the answer would be this 0.0.1.
+	if len(snap.Packument.Versions) != 3 {
+		t.Errorf("served the planted record: %+v", snap.Packument.Versions)
 	}
 }
 

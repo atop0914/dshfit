@@ -147,7 +147,8 @@ promise about versions that do not exist yet:
 | `>=host` | drop what you declare (offered only for a numeric shortfall) |
 
 Nothing here consults the registry, so this is the smallest edit to the *range*,
-not a claim that some published version already declares it.
+not a claim that some published version already declares it. That second
+question is `--registry`, below.
 
 Four rules make the grouping trustworthy:
 
@@ -172,6 +173,71 @@ blocked. In a profile that is what data and tooling packages look like — the r
 `dsh-plugin-catalog` is one — and blocking them would train users to ignore the
 blocked count. Pointed at directly, the same package is still a block, because
 then the user is asserting it is a plugin.
+
+
+### Registry: what the publisher ships
+
+A profile run reads your disk, so it can only say "the version you have will not
+load". The next question is always "is there one that will?", and that answer is
+in the registry, not on the machine. `--registry` adds it — off by default,
+because a tool whose job is checking an upgrade before you perform it has no
+business opening a socket unless you said so:
+
+```console
+$ dshfit profile --host 0.2.2-rc.1 --registry testdata/profile/web/list.json
+...
+registry — releases the publisher ships
+  dsh-narrow-range  could not be checked: "dsh-narrow-range": package not found
+    in registry (the name is unpublished or private)
+    nothing here says whether a released version would load
+  dsh-pet  latest 0.4.8 does not admit 0.2.2-rc.1
+    rejects 9 peer(s) declaring ^0.2.0-rc.1 (prerelease-gate): @deepseek-ai/dsh-agent-default-model,
+    @deepseek-ai/dsh-commands, @deepseek-ai/dsh-credentials, and 6 more
+    no published version admits 0.2.2-rc.1, out of 42 checked
+    data as of 2026-11-12T12:39:53Z (from the registry)
+```
+
+Two sentences are deliberately different, and the difference is the point:
+
+- **`does not admit`** — the registry answered. The newest release's own peer
+  ranges were run through the same engine that judged your copy, and it refuses
+  this host. With a numerator and a denominator (`out of 42 checked`) so the
+  claim can be audited.
+- **`could not be checked`** — the registry did not answer, or has no such name.
+  Nothing is known, and the line says so instead of printing "no compatible
+  release exists". A network failure that reads as a compatibility verdict is the
+  one output this tool must never produce.
+
+`admit` is not `will work`: it means npm's range check accepts the host for that
+published version. Whether the plugin actually runs is still the author's claim,
+which is why the local verdict stays the headline and this section only follows
+it.
+
+#### Cache and `--offline`
+
+Registry data is cached (default 24h, `--cache-ttl`), one file per package **and
+target host**: the packument is host-independent, but the file records the
+question it answered, and a record that names a different host is refetched
+rather than reused. The file also records *when* it was written, which is the
+only reason a cache hit is not a lie:
+
+```console
+$ dshfit profile --host 0.2.2-rc.1 --registry --offline testdata/profile/web/list.json
+  dsh-pet  latest 0.4.8 does not admit 0.2.2-rc.1
+    no published version admits 0.2.2-rc.1, out of 42 checked
+    data as of 2026-11-12T12:39:53Z (from cache, offline)
+```
+
+- `--offline` never touches the network. A cache miss is reported per package —
+  `no cached registry data ... run once without --offline` — not silently
+  skipped.
+- When a refresh fails but an older copy exists, the old copy is printed with
+  both its age *and* the failure (`refresh failed: HTTP 502`). Serving it as
+  current data would be worse than not answering.
+- A cache that cannot be written is one line of output, not a failed run: the
+  answer already came from the registry.
+- `--format markdown` does not grow a registry section. A CI summary of the
+  local verdict must not start depending on the network.
 
 
 ### Version diff
@@ -279,11 +345,25 @@ $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 
 ```console
 $ dshfit check --host <version> [--json] <plugin-dir|package.tgz>...
-$ dshfit profile --host <version> [--json|--format text|markdown] <listing.json|->
+$ dshfit profile --host <version> [--json|--format text|markdown] [--registry [--offline]] <listing.json|->
 $ dshfit diff --from <version> --to <version> [--json] <listing.json|->
 $ dshfit serve
 $ dshfit version
 ```
+
+`--registry` flags for `profile` (all optional, none of them on by default):
+
+| flag | meaning |
+|---|---|
+| `--registry` | also ask npm which published releases accept the host |
+| `--offline` | cached registry data only; implies `--registry`, never dials |
+| `--cache-dir` | where the cache lives (default `<user cache>/dshfit/registry`) |
+| `--cache-ttl` | how long a cached packument counts as current (default 24h; a negative value refetches every run) |
+| `--registry-url` | registry base URL (default `https://registry.npmjs.org`) |
+
+The registry answer is an addition to the report, never a substitution: exit
+status still means "will this profile load", so a network failure cannot turn a
+blocked profile into a passing one.
 
 `--format markdown` is the same answer, laid out for a CI step summary: a
 one-line conclusion, one table row per root cause with the smallest edit that
@@ -297,6 +377,15 @@ one win silently.
 `verdict`, `issues[]`) for scripting. `dir` is whatever you passed — a directory
 or an archive path — and `source` is `dir` or `tarball`, so a consumer can tell
 which findings were verified against an artifact and which were inferred.
+
+With `--registry`, each blocked entry also carries a `registry` object:
+`latest`, `latest_admits`, `latest_rejections[]` (`package`, `range`, `reason`,
+`detail`), `admitting[]`, `published`, `unparseable`, `as_of`, `from`, `stale`,
+`refresh_error`, `cache_error`, and `error`. `error` means the lookup failed and
+nothing is known — reading it as "no compatible release" is the mistake this
+field exists to prevent. Every rejection there was computed by the same engine
+that produced the local verdict, so the two halves of one report cannot
+disagree about the same range.
 
 `diff --json` emits one object instead: `from`, `to`, `projects`, `changes[]`
 (`kind`, `name`, `from`, `to`, and both sides' `status` / `verdict` / `causes`),

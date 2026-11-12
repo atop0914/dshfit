@@ -13,6 +13,8 @@ Everything else follows from taking that seriously.
 cmd/dshfit          thin main: os.Exit(cli.Run(...))
 internal/cli        argument parsing, exit codes, text and JSON rendering
 internal/compat     verdicts: version gating + bundle structure + archive cross-checks
+internal/profile    whole-profile verdicts, root-cause grouping, the registry answer
+internal/registry   packument fetch + trim + on-disk cache (no host judgement)
 internal/manifest   what the bundle promises: a directory or an npm tarball
 internal/semver     npm range algebra and the prerelease gate
 ```
@@ -22,11 +24,18 @@ deliberate. The interesting failures in this problem are all range-algebra
 failures, and pure code lets each one be pinned by a table row instead of a
 fixture.
 
-`internal/manifest` is the only layer that touches the disk. It reads one
-`package.json`, one patch file, and — when given a `.tgz` — the archive those two
-came out of. It never infers: an unreadable patch is an error, not an empty list,
-and an archive that is not rooted at `package/` is an error, not a guess about
-which segment was the root.
+`internal/manifest` is the only layer that touches the *plugin's* disk. It reads
+one `package.json`, one patch file, and — when given a `.tgz` — the archive those
+two came out of. It never infers: an unreadable patch is an error, not an empty
+list, and an archive that is not rooted at `package/` is an error, not a guess
+about which segment was the root.
+
+`internal/registry` writes one directory of its own — the cache — and reads
+nothing else. That is the narrowest exception that works: the cache has to be a
+file to survive between runs, and putting it in `manifest` (which reads a user's
+checkout) would blur "this is a plugin" with "this is our own scratch space".
+Neither package reads the other's files, and no package above them reads the
+filesystem for plugin data.
 
 ## Why the prerelease gate is not optional
 
@@ -345,12 +354,85 @@ client that reads the exit code instead of the responses would report the last
 request's outcome for all of them. Only a broken stdout exits non-zero, because
 then there is nowhere left to say anything.
 
+## Why the registry answer is a second question, not a better verdict
+
+`profile` reads the disk, so its verdict is about the copy you have. The registry
+holds what the publisher shipped, which is a different subject: a package can be
+blocked at the version installed and fine at the latest one, and it can be fine
+installed and blocked at the latest. Answering the second question inside the
+first would make the verdict depend on the network, and a report whose headline
+flips when a socket fails is worse than one that never asks.
+
+So the call order is fixed and one-directional:
+
+1. `profile.Assess` judges every package and produces the verdict, groups and
+   counts. Nothing about the registry can change them.
+2. `profile.AnnotateRegistry` fills `Entry.Registry` for **blocked plugins
+   only**, when the caller asked. It writes an answer, not a status.
+3. The exit code still means "will this profile load". A failed lookup cannot
+   turn exit 1 into exit 0, and it cannot turn a block into a pass.
+
+Blocked only, for two reasons. A plugin that loads has no use for the release
+list, and a profile with twenty plugins would become twenty network calls — the
+cost of the feature would land on the users who do not need it. Opt-in (`--registry`,
+off by default) is the same argument one level up: this tool's job is checking an
+upgrade *before* performing it, and a checker that dials out unasked is a checker
+people stop running in CI.
+
+`internal/registry` therefore knows nothing about hosts. It fetches a packument,
+trims it to `{version, peers, engines}`, and caches it. The judgment — does this
+peer set accept that host — is `compat.RejectingPeers`, the same function
+`checkPeers` uses for the installed copy. This is the same anti-divergence rule
+as the diff (`docs/design.md`, "Why a diff is not a verdict comparison"):
+two implementations of one range decision drift, and after they drift the report
+says "your copy is blocked but the published one is fine" about the same range,
+which is not actionable by anyone.
+
+Three outcomes, three sentences, and they are never merged:
+
+| outcome | what it means | what it must not say |
+|---|---|---|
+| `latest X admits H` | the newest release's own peers accept H | that the plugin runs |
+| `latest X does not admit H` (with `out of N checked`) | the registry answered and no published version accepts H | that H cannot be supported — the author can publish one tomorrow |
+| `could not be checked` | nothing is known: 404, timeout, 5xx, malformed or oversized body | "no compatible release exists" |
+
+`admits` means npm's range check accepts the host for that published version.
+Whether the bundle then works is still the author's claim, which is why this
+section follows the local verdict instead of replacing it, and why `--registry`
+does not appear in `--format markdown`: a CI summary of a local check must not
+start depending on a socket.
+
+### Cache: the age is part of the answer
+
+A cache is a claim about the past, so the claim is printed with it — `data as of
+<time>`, `from cache`, `offline`, or `refresh failed: <error>`. The rules:
+
+- **The key is package + host + registry.** The packument is host-independent,
+  but the file records the question it answered; a record naming another host or
+  another mirror is refetched, never reused. Filenames carry the host readably
+  and the triple hashed, so a collision cannot serve the wrong question.
+- **Freshness is a TTL, and a future timestamp is not freshness.** This container
+  has moved its clock backwards; an entry dated in the future is treated as
+  stale, because it can only be wrong.
+- **A failed refresh falls back to the stale copy with both facts printed.**
+  Silence there would turn an hour-old document into "current".
+- **A miss offline is an error naming the package and the flag that fixes it.**
+  No empty answer, for the same reason no empty packument: an empty result is
+  indistinguishable from a real one downstream.
+- **A cache write failure is a sentence, not a failure.** The answer already came
+  from the network; refusing to print it because the disk is read-only punishes
+  the user for the wrong thing.
+
+Atomic writes (temp file + rename) because a half-written cache file reads back
+as "this package has three versions", and a truncated packument is worse than a
+missing one: the missing one triggers a fetch.
+
 ## Next
 
-1. Registry lookup: the solver now produces the smallest edit to a *range*; the
-   remaining question is whether some published version already declares a range
-   that admits the host, which needs `npm view` and a cache. The two answers are
-   different — "write this" versus "install that" — and must not be conflated.
+1. ~~Registry lookup~~ — done (Day 9): `profile --registry`, `--offline`, and a
+   per-host cache. Still open: using the admitting version list to propose an
+   install (`install that`) next to the range edit (`write this`), and reading
+   `dist.tarball` so a specific published version can be checked as an archive.
 2. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
    the matrix is visible where people actually upgrade. The protocol half exists
    (`dshfit serve`); the panel half is still being written, and it renders what
