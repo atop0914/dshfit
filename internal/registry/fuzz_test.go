@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,8 +106,13 @@ func FuzzCacheRecord(f *testing.F) {
 		"dsh-pet", "0.2.2-rc.1")
 
 	f.Fuzz(func(t *testing.T, body []byte, pkg, host string) {
-		if pkg == "" || host == "" {
-			return // Lookup rejects these before touching the cache
+		// A blank name is rejected by Lookup before it ever looks at the cache,
+		// so there is no cache behaviour to observe. The first version of this
+		// guard tested `pkg == ""`, and a fuzzer reached it with a single space
+		// within a minute — the empty-string case was the one shape we had
+		// thought of.
+		if strings.TrimSpace(pkg) == "" || strings.TrimSpace(host) == "" {
+			return
 		}
 		dir := t.TempDir()
 		c, err := New(Options{BaseURL: DefaultBaseURL, CacheDir: dir, TTL: time.Hour})

@@ -442,6 +442,34 @@ is red on every run is a gate nobody reads. It requires `jq` (present on GitHub
 runners); the table is a measured fact about the fixtures, so when a change is
 meant to move one, that row moves in the same commit.
 
+### Fuzzing
+
+Two of this tool's inputs are written by people who are not here: the peer range
+strings in someone's `package.json`, and the packument the registry returns. A
+panic on either is not one wrong verdict — it is the other nineteen plugins losing
+theirs, in a run that prints nothing at all.
+
+```console
+$ make fuzz                # 10s per target, four targets
+$ make fuzz FUZZTIME=2m
+```
+
+The assertions are the promises above, not "does not crash":
+
+| target | promise |
+|---|---|
+| `FuzzParseRange` | arbitrary bytes may not panic; a failed parse leaves no half range behind |
+| `FuzzExplain` | a rejection always names a clause and a reason, and repeats identically |
+| `FuzzRegistryParse` | a successful parse always has ≥1 parseable version — an empty list is never an answer |
+| `FuzzCacheRecord` | a corrupt cache file is a miss to refetch, never a crash and never "no cache" |
+
+`make fuzz` is deliberately absent from `make ci`. A fuzz run finds inputs by
+chance: a pass proves nothing about what it did not try, and a job that goes red at
+a random minute on an input nobody kept is a job people switch off. What CI runs is
+the corpus — the seeds inside each target plus anything under `testdata/fuzz/` —
+because those are ordinary regression tests. When the fuzzer does fail, it writes
+the input there; that file is the evidence and it must be committed.
+
 ### pre-commit
 
 Same command, run before the commit instead of after the push:

@@ -46,6 +46,27 @@ test-noskip:
 race:
 	$(GO) test -count=1 -race -timeout 300s ./...
 
+# Fuzzing is a separate target on purpose, and it is not in `ci`.
+#
+# A fuzz run finds inputs by chance: a green run says nothing about what it did
+# not try, and a job that goes red at a random minute on an input nobody kept is
+# a job people turn off. What CI runs instead is the corpus — the seeds inside
+# each target, plus anything the fuzzer wrote to testdata/fuzz/, every entry of
+# which is an ordinary regression test. When a run does fail there, commit the
+# file it wrote: that is the evidence, and it keeps working after the fuzzer
+# stops.
+FUZZTIME ?= 10s
+.PHONY: fuzz
+fuzz:
+	@for t in FuzzParseRange FuzzExplain; do \
+		echo "--- semver/$$t $(FUZZTIME)"; \
+		$(GO) test -run=^$$ -fuzz=^$$t$$ -fuzztime=$(FUZZTIME) ./internal/semver/ || exit 1; \
+	done
+	@for t in FuzzRegistryParse FuzzCacheRecord; do \
+		echo "--- registry/$$t $(FUZZTIME)"; \
+		$(GO) test -run=^$$ -fuzz=^$$t$$ -fuzztime=$(FUZZTIME) ./internal/registry/ || exit 1; \
+	done
+
 .PHONY: build
 build:
 	@mkdir -p bin

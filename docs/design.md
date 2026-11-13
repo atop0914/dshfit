@@ -272,6 +272,64 @@ A warning keeps the information and keeps the exit code honest.
   prints everything scores just as well on "does it mention the plugin that
   breaks", which is why the negative case is the one that carries the weight.
 
+## Why fuzzing here is evidence, not bug-hunting
+
+Two inputs are written by strangers: the range strings in a third party's
+`package.json`, and the packument the registry returns. Before this, every case
+covering them was one we thought of.
+
+The failure mode that matters is not a wrong verdict. It is a panic on the fourth
+package of twenty: the user gets no report at all, from the tool whose entire
+argument is that nobody should have to find breakage one plugin at a time. So the
+four targets assert the product's promises rather than "does not crash":
+
+- `FuzzParseRange` (semver) — arbitrary bytes in, no panic; a failed parse never
+  leaves a usable-looking half range behind, because a caller that ignores the
+  error would otherwise print a verdict computed from half a range.
+- `FuzzExplain` (semver) — a rejection always carries one of the two Kinds, a
+  clause, and a detail that names the version it is about; the same pair explained
+  twice is identical, because a report that changes between runs cannot be quoted
+  in an issue.
+- `FuzzRegistryParse` — a successful parse always yields at least one parseable,
+  ascending version. That is the machine form of "an empty result must never pass
+  for an answer": "no compatible release exists" can only be said after seeing a
+  release.
+- `FuzzCacheRecord` — an arbitrary byte string at the position of a cache file is
+  either a usable record or an error. **An existing file may never read as "no
+  cache"**: that makes a corrupt entry indistinguishable from an absent one and
+  silently throws away the copy the user paid a network round trip for. Offline,
+  the bad record must surface as "go and fetch", never as an answer.
+
+`make fuzz` is not part of `make ci`. A fuzz run finds inputs by chance, so a green
+run says nothing about what it did not try, and a job that goes red at a random
+minute is a job people switch off. What CI runs is the corpus: the seeds in the
+target plus anything the fuzzer wrote to `testdata/fuzz/`, every entry of which is
+an ordinary regression test.
+
+### What the properties found
+
+The fuzz targets found no panic. The property tests found a real wrong answer on
+their first run: `^9223372036854775807.0.0` expanded to
+`>=9223372036854775807.0.0 <-9223372036854775808.0.0`. The upper bound needs
+major+1, and for the largest int that addition wraps into a negative major, so the
+range excluded its own lower bound — a plugin that loads perfectly, reported
+blocked. That is the one error this tool must never make.
+
+Every branch that computes a bound had the same defect (caret, tilde, `>1.x`,
+`<=1`, x-ranges, hyphen ranges). They now share three helpers: an upper bound that
+cannot be represented is dropped, because it is above every version and "less than
+it" is therefore always true; a lower bound that cannot be represented becomes
+`> topVersion`, which no version can reach. The one thing that must not happen is
+returning no comparator at all, because an empty comparator set means "any" —
+precisely the opposite.
+
+The properties are the interesting part, since each is a sentence about npm rather
+than about this code: a range contains its own lower bound, does not contain its
+own strict upper bound, admits any version one of its clauses admits (the `A || B`
+early-return bug from day one), and calls a numerically-inside prerelease a gate
+rather than an out-of-range — while still admitting later tags of a core its own
+comparators name.
+
 ## Why a diff is not a verdict comparison
 
 Two reports printed side by side cannot be compared by eye. The order, the
