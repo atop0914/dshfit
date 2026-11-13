@@ -2,6 +2,7 @@ package semver
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -202,11 +203,10 @@ func parseSet(src string) (comparatorSet, error) {
 			return comparatorSet{}, err
 		}
 		set.comps = append(set.comps, comparator{op: opGTE, ver: lowerBound(lowPart)})
-		low, ok := upperBoundInclusive(highPart)
-		if ok {
-			set.comps = append(set.comps, comparator{op: opLTE, ver: low})
-		} else {
-			set.comps = append(set.comps, comparator{op: opLT, ver: upperBoundExclusive(highPart)})
+		if bound, ok := upperBoundInclusive(highPart); ok {
+			set.comps = append(set.comps, comparator{op: opLTE, ver: bound})
+		} else if bound, ok := upperBoundExclusive(highPart); ok {
+			set.comps = append(set.comps, comparator{op: opLT, ver: bound})
 		}
 		return set, nil
 	}
@@ -254,6 +254,50 @@ func splitHyphen(s string) (lo, hi string, ok bool) {
 	return lo, hi, true
 }
 
+// Version numbers are ints here, so "one past the largest major" does not exist.
+// Caret, tilde, wildcard comparators and hyphen ranges all need to compute a
+// bound one step above what the author wrote, and every one of them can be handed
+// the largest int. Letting that addition wrap produced a real wrong answer:
+// `^9223372036854775807.0.0` expanded to `>=9223372036854775807.0.0
+// <-9223372036854775808.0.0`, a range that excludes its own lower bound — a
+// plugin that loads fine reported as blocked.
+//
+// The two helpers below state what a missing bound means instead of computing it.
+const maxDimension = math.MaxInt
+
+// topVersion is greater than every other version, so "> topVersion" admits
+// nothing: it stands in for a lower bound one past the largest representable
+// number, which no version can reach. Returning no comparators instead would be
+// read as "any version", i.e. the exact opposite.
+var topVersion = Version{Major: maxDimension, Minor: maxDimension, Patch: maxDimension}
+
+// incMajor / incMinor / incPatch return the next bound in that dimension, or
+// false when it does not fit. An upper bound that cannot be represented is above
+// every version, so "< bound" is true for all of them and the comparator is
+// dropped; a lower bound that cannot be represented is unreachable, so it becomes
+// a comparison against topVersion.
+func incMajor(m int) (Version, bool) {
+	if m >= maxDimension {
+		return Version{}, false
+	}
+	return Version{Major: m + 1}, true
+}
+
+func incMinor(m, n int) (Version, bool) {
+	if n >= maxDimension {
+		return Version{}, false
+	}
+	return Version{Major: m, Minor: n + 1}, true
+}
+
+func incPatch(v Version) (Version, bool) {
+	if v.Patch >= maxDimension {
+		return Version{}, false
+	}
+	v.Patch++
+	return v, true
+}
+
 func expand(tok string) ([]comparator, error) {
 	s := strings.TrimSpace(tok)
 	if s == "" {
@@ -292,24 +336,31 @@ func caret(p partial) []comparator {
 	if p.wild[2] {
 		lo.Patch = 0
 	}
+	// The upper bound is omitted when it cannot be represented, which means it
+	// is above every version — including this range's own lower bound.
+	comps := []comparator{{op: opGTE, ver: lo}}
 	var hi Version
+	var ok bool
 	switch {
 	case p.wild[1]:
-		hi = Version{Major: m + 1}
+		hi, ok = incMajor(m)
 	case p.wild[2]:
 		if m > 0 {
-			hi = Version{Major: m + 1}
+			hi, ok = incMajor(m)
 		} else {
-			hi = Version{Minor: n + 1}
+			hi, ok = incMinor(m, n)
 		}
 	case m > 0:
-		hi = Version{Major: m + 1}
+		hi, ok = incMajor(m)
 	case n > 0:
-		hi = Version{Minor: n + 1}
+		hi, ok = incMinor(m, n)
 	default:
-		hi = Version{Patch: pt + 1}
+		hi, ok = incPatch(Version{Major: m, Minor: n, Patch: pt})
 	}
-	return []comparator{{op: opGTE, ver: lo}, {op: opLT, ver: hi}}
+	if ok {
+		comps = append(comps, comparator{op: opLT, ver: hi})
+	}
+	return comps
 }
 
 func tilde(p partial) []comparator {
@@ -324,13 +375,18 @@ func tilde(p partial) []comparator {
 	if p.wild[2] {
 		lo.Patch = 0
 	}
+	comps := []comparator{{op: opGTE, ver: lo}}
 	var hi Version
+	var ok bool
 	if p.wild[1] {
-		hi = Version{Major: m + 1}
+		hi, ok = incMajor(m)
 	} else {
-		hi = Version{Major: m, Minor: n + 1}
+		hi, ok = incMinor(m, n)
 	}
-	return []comparator{{op: opGTE, ver: lo}, {op: opLT, ver: hi}}
+	if ok {
+		comps = append(comps, comparator{op: opLT, ver: hi})
+	}
+	return comps
 }
 
 func plain(prefix string, p partial) []comparator {
@@ -342,33 +398,53 @@ func plain(prefix string, p partial) []comparator {
 	case p.wild[1]: // "1", "1.x"
 		switch prefix {
 		case ">":
-			return []comparator{{op: opGTE, ver: Version{Major: m + 1}}}
+			// "> 1" is ">= 2.0.0"; when 2.0.0 does not exist, nothing matches.
+			if hi, ok := incMajor(m); ok {
+				return []comparator{{op: opGTE, ver: hi}}
+			}
+			return []comparator{{op: opGT, ver: topVersion}}
 		case ">=":
 			return []comparator{{op: opGTE, ver: Version{Major: m}}}
 		case "<":
 			return []comparator{{op: opLT, ver: Version{Major: m}}}
 		case "<=":
-			return []comparator{{op: opLT, ver: Version{Major: m + 1}}}
+			// "<= 1" is "< 2.0.0"; past the top that is every version.
+			if hi, ok := incMajor(m); ok {
+				return []comparator{{op: opLT, ver: hi}}
+			}
+			return []comparator{{op: opLTE, ver: topVersion}}
 		}
-		return []comparator{
-			{op: opGTE, ver: Version{Major: m}},
-			{op: opLT, ver: Version{Major: m + 1}},
+		if hi, ok := incMajor(m); ok {
+			return []comparator{
+				{op: opGTE, ver: Version{Major: m}},
+				{op: opLT, ver: hi},
+			}
 		}
+		return []comparator{{op: opGTE, ver: Version{Major: m}}}
 	case p.wild[2]: // "1.2", "1.2.x"
 		switch prefix {
 		case ">":
-			return []comparator{{op: opGTE, ver: Version{Major: m, Minor: n + 1}}}
+			if hi, ok := incMinor(m, n); ok {
+				return []comparator{{op: opGTE, ver: hi}}
+			}
+			return []comparator{{op: opGT, ver: topVersion}}
 		case ">=":
 			return []comparator{{op: opGTE, ver: Version{Major: m, Minor: n}}}
 		case "<":
 			return []comparator{{op: opLT, ver: Version{Major: m, Minor: n}}}
 		case "<=":
-			return []comparator{{op: opLT, ver: Version{Major: m, Minor: n + 1}}}
+			if hi, ok := incMinor(m, n); ok {
+				return []comparator{{op: opLT, ver: hi}}
+			}
+			return []comparator{{op: opLTE, ver: topVersion}}
 		}
-		return []comparator{
-			{op: opGTE, ver: Version{Major: m, Minor: n}},
-			{op: opLT, ver: Version{Major: m, Minor: n + 1}},
+		if hi, ok := incMinor(m, n); ok {
+			return []comparator{
+				{op: opGTE, ver: Version{Major: m, Minor: n}},
+				{op: opLT, ver: hi},
+			}
 		}
+		return []comparator{{op: opGTE, ver: Version{Major: m, Minor: n}}}
 	}
 	v := p.version()
 	if prefix == "" || prefix == "=" {
@@ -397,8 +473,8 @@ func lowerBound(p partial) Version {
 	return v
 }
 
-// upperBoundInclusive handles the right side of a hyphen range. "1.2.3 - 2.3.4"
-// includes 2.3.4; "1.2.3 - 2.3" means "up to but not including 2.4.0".
+// upperBoundInclusive handles the right side of a hyphen range whose end names a
+// full version: "1.2.3 - 2.3.4" includes 2.3.4.
 func upperBoundInclusive(p partial) (Version, bool) {
 	if p.wild[1] || p.wild[2] {
 		return Version{}, false
@@ -406,15 +482,16 @@ func upperBoundInclusive(p partial) (Version, bool) {
 	return p.version(), true
 }
 
-func upperBoundExclusive(p partial) Version {
+// upperBoundExclusive handles the partial end: "1.2.3 - 2.3" means "up to but not
+// including 2.4.0", and "1.2.3 - 2" means "up to 3.0.0".
+//
+// A false return means that bound lies past the top of the version domain (a
+// hyphen range ending at the largest minor), which no version can reach, so the
+// caller drops the comparator — the same statement, without inventing a number.
+func upperBoundExclusive(p partial) (Version, bool) {
 	v := p.version()
 	if p.wild[1] {
-		v.Minor, v.Patch = 0, 0
-		return Version{Major: v.Major + 1}
+		return incMajor(v.Major)
 	}
-	if p.wild[2] {
-		v.Patch = 0
-		return Version{Major: v.Major, Minor: v.Minor + 1}
-	}
-	return v
+	return incMinor(v.Major, v.Minor)
 }
