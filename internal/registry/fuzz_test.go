@@ -24,6 +24,10 @@ var packumentSeeds = []struct {
 		"0.3.0":{"version":"0.3.0","peerDependencies":{"@deepseek-ai/dsh":">=0.2.0-rc.1 <0.3.0"}}}}`)},
 	{"dsh-context", []byte(`{"name":"dsh-context","versions":{"0.2.2-rc.1":{"version":"0.2.2-rc.1"}}}`)},
 	{"dsh-key-mismatch", []byte(`{"versions":{"1.0.0":{"version":"9.9.9"},"v2.0.0":{},"not-a-version":{"version":"beta"}}}`)},
+	// Every version key present, none of them orderable: the case the second
+	// emptiness check exists for, and the one that would otherwise turn into
+	// "the publisher shipped nothing that fits" without a single release seen.
+	{"dsh-all-unparseable", []byte(`{"versions":{"beta":{"version":"beta"},"latest":{"version":"latest"}}}`)},
 	{"dsh-empty", []byte(`{"name":"dsh-empty","versions":{}}`)},
 	{"dsh-null", []byte(`null`)},
 	{"dsh-not-an-object", []byte(`[]`)},

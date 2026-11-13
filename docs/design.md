@@ -330,6 +330,14 @@ early-return bug from day one), and calls a numerically-inside prerelease a gate
 rather than an out-of-range — while still admitting later tags of a core its own
 comparators name.
 
+One of them had to be rewritten after a mutation survived it. The upper-bound
+property originally read the ceiling back out of the parsed comparators, so
+flipping `<` to `<=` changed the expectation along with the code and the test
+stayed green. It now carries an explicit table of "the first release the author
+did not mean to cover" (`^0.1.0-rc.6` → `0.2.0`). The general lesson is worth more
+than the fix: **a property that asks the code what to expect cannot notice a change
+in how the code states its answer.**
+
 ## Why a diff is not a verdict comparison
 
 Two reports printed side by side cannot be compared by eye. The order, the

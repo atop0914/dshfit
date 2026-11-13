@@ -75,11 +75,53 @@ func TestPropertyLowerBoundSatisfies(t *testing.T) {
 	}
 }
 
+// ceilingOf states, per range, the version npm's semantics put just outside the
+// upper end — the first release the author did not mean to cover.
+//
+// It is written out here rather than read back from the comparator list, and the
+// reason is a measured one: the first version of this test derived the bound from
+// the parsed comparators, so flipping `<` to `<=` changed the expectation along
+// with the code and left the test green. A property that asks the code what to
+// expect cannot notice a change in how the code writes the bound.
+var ceilingOf = map[string]string{
+	"^0.1.0-rc.6":         "0.2.0",
+	"^0.2.0-rc.1":         "0.3.0",
+	"^0.4.0":              "1.0.0",
+	"^0.0.3":              "0.0.4",
+	"~1.2.3":              "1.3.0",
+	"~1.2.3-beta.2":       "1.3.0",
+	"~1":                  "2.0.0",
+	">=0.2.0-rc.1 <0.3.0": "0.3.0",
+	"1.2.3 - 2.3.4":       "2.3.5",
+	"1.2.3 - 2.3":         "2.4.0",
+	"1.x":                 "2.0.0",
+	"1.2.x":               "1.3.0",
+	"1.x.2":               "2.0.0",
+}
+
 // TestPropertyUpperBoundIsExcluded pins the other half of the expansion. The
 // upstream breakage is a range whose upper bound is one minor too high, so the
-// assertion is that the bound itself is rejected, not that some version above it
-// is.
+// assertion is that the version just past the end is rejected, not that some
+// version far above it is.
 func TestPropertyUpperBoundIsExcluded(t *testing.T) {
+	for raw, ceiling := range ceilingOf {
+		r, err := ParseRange(raw)
+		if err != nil {
+			t.Fatalf("ParseRange(%q): %v", raw, err)
+		}
+		v, err := Parse(ceiling)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", ceiling, err)
+		}
+		if r.Satisfies(v) {
+			t.Errorf("%q admits %s, which is past its own upper end", raw, ceiling)
+		}
+	}
+
+	// The same claim derived from the expansion, for the ranges no table entry
+	// covers. This half also checks the opposite direction: an inclusive upper
+	// bound must admit the version it names, or a hyphen range would silently
+	// lose its last patch release.
 	for _, raw := range propertyRanges {
 		r, err := ParseRange(raw)
 		if err != nil {
