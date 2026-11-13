@@ -78,7 +78,7 @@ func validate(rec *record, pkg, host, registry string) error {
 	// which is how a cache turns into "the publisher shipped fewer versions".
 	for _, v := range rec.Packument.Versions {
 		if _, err := semver.Parse(v.Version); err != nil {
-			return fmt.Errorf("lists version %q which is not a version (%v)", v.Version, err)
+			return fmt.Errorf("lists version %q which is not a version: %w", v.Version, err)
 		}
 	}
 	return nil
