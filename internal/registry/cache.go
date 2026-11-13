@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/atop0914/dshfit/internal/semver"
 )
 
 // record is one cache file. It stores the question it answered (package, host,
@@ -44,17 +46,42 @@ func (c *Client) loadRecord(pkg, host string) (*record, error) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return nil, fmt.Errorf("cached registry data at %s is corrupt: %w", path, err)
 	}
-	if rec.Package != pkg || rec.Host != host || rec.Registry != c.opts.BaseURL {
-		return nil, fmt.Errorf("cached registry data at %s describes %s@%s from %s, not %s@%s from %s",
-			path, rec.Package, rec.Host, rec.Registry, pkg, host, c.opts.BaseURL)
-	}
-	if rec.FetchedAt.IsZero() {
-		return nil, fmt.Errorf("cached registry data at %s has no fetch time, so its age is unknown", path)
-	}
-	if len(rec.Packument.Versions) == 0 {
-		return nil, fmt.Errorf("cached registry data at %s lists no versions, so it cannot answer anything", path)
+	if err := validate(&rec, pkg, host, c.opts.BaseURL); err != nil {
+		return nil, fmt.Errorf("cached registry data at %s %w", path, err)
 	}
 	return &rec, nil
+}
+
+// validate decides whether a decoded record may be used to answer (pkg, host)
+// against registry.
+//
+// It is separate from loadRecord because the file's bytes are third-party input:
+// a cache directory is a plain directory of JSON that a user may edit, a backup
+// tool may truncate, or another version of this tool may have written in a shape
+// this one does not understand. Testing that a hand-edited file means "miss and
+// refetch" needs a way to feed arbitrary bytes in without touching the disk, and
+// a fuzz target cannot build a filesystem per iteration.
+func validate(rec *record, pkg, host, registry string) error {
+	if rec.Package != pkg || rec.Host != host || rec.Registry != registry {
+		return fmt.Errorf("describes %s@%s from %s, not %s@%s from %s",
+			rec.Package, rec.Host, rec.Registry, pkg, host, registry)
+	}
+	if rec.FetchedAt.IsZero() {
+		return fmt.Errorf("has no fetch time, so its age is unknown")
+	}
+	if len(rec.Packument.Versions) == 0 {
+		return fmt.Errorf("lists no versions, so it cannot answer anything")
+	}
+	// A record that decodes is not yet a record that can be used: every version
+	// in it has to be orderable, because the answer is a comparison against a
+	// host. An entry that does not parse would be silently skipped downstream,
+	// which is how a cache turns into "the publisher shipped fewer versions".
+	for _, v := range rec.Packument.Versions {
+		if _, err := semver.Parse(v.Version); err != nil {
+			return fmt.Errorf("lists version %q which is not a version (%v)", v.Version, err)
+		}
+	}
+	return nil
 }
 
 // storeRecord writes the record atomically: a temp file in the same directory,
