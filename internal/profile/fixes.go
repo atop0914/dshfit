@@ -1,6 +1,9 @@
 package profile
 
-import "github.com/atop0914/dshfit/internal/fix"
+import (
+	"github.com/atop0914/dshfit/internal/codes"
+	"github.com/atop0914/dshfit/internal/fix"
+)
 
 // attachFix asks the solver for machine-checked rewrites of a group's range.
 //
@@ -11,7 +14,7 @@ import "github.com/atop0914/dshfit/internal/fix"
 // text is the whole answer.
 func attachFix(g *Group, host string) {
 	switch g.Code {
-	case "peer-range-excludes-host", "unparseable-peer-range":
+	case codes.PeerRangeExcludesHost, codes.UnparseablePeerRange:
 	default:
 		return
 	}

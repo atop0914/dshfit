@@ -27,7 +27,7 @@ func writePlugin(t *testing.T, pkg string, extra map[string]string) string {
 	return dir
 }
 
-func codes(rep Report) []string {
+func issueCodes(rep Report) []string {
 	out := make([]string, 0, len(rep.Issues))
 	for _, is := range rep.Issues {
 		out = append(out, is.Code)
@@ -101,7 +101,7 @@ func TestZeroOnePeerBlocksZeroTwoHost(t *testing.T) {
 		t.Fatalf("verdict = %q, want blocked", rep.Verdict)
 	}
 	if !has(rep, "peer-range-excludes-host") {
-		t.Fatalf("codes = %v, want peer-range-excludes-host", codes(rep))
+		t.Fatalf("codes = %v, want peer-range-excludes-host", issueCodes(rep))
 	}
 	for _, is := range rep.Issues {
 		if is.Code != "peer-range-excludes-host" {
@@ -124,7 +124,7 @@ func TestMissingBundleInstallsButNeverMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !has(rep, "no-bundle") {
-		t.Fatalf("codes = %v, want no-bundle", codes(rep))
+		t.Fatalf("codes = %v, want no-bundle", issueCodes(rep))
 	}
 	if rep.Verdict != Blocked {
 		t.Fatalf("verdict = %q, want blocked", rep.Verdict)
@@ -142,7 +142,7 @@ func TestPatchMissingFromFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !has(rep, "patch-missing-from-files") {
-		t.Fatalf("codes = %v, want patch-missing-from-files", codes(rep))
+		t.Fatalf("codes = %v, want patch-missing-from-files", issueCodes(rep))
 	}
 }
 
@@ -154,7 +154,7 @@ func TestPatchNameMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !has(rep, "patch-name-mismatch") {
-		t.Fatalf("codes = %v, want patch-name-mismatch", codes(rep))
+		t.Fatalf("codes = %v, want patch-name-mismatch", issueCodes(rep))
 	}
 }
 
@@ -172,7 +172,7 @@ func TestEnginesOnlyWarns(t *testing.T) {
 		t.Fatalf("verdict = %q, want warn; issues: %v", rep.Verdict, rep.Issues)
 	}
 	if !has(rep, "engines-dsh-excludes-host") {
-		t.Fatalf("codes = %v, want engines-dsh-excludes-host", codes(rep))
+		t.Fatalf("codes = %v, want engines-dsh-excludes-host", issueCodes(rep))
 	}
 }
 

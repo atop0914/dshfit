@@ -118,7 +118,7 @@ func TestDeclaredFileNotInTarball(t *testing.T) {
 		t.Fatalf("verdict = %q, want blocked; issues: %v", rep.Verdict, rep.Issues)
 	}
 	if !has(rep, "declared-file-not-in-tarball") {
-		t.Fatalf("codes = %v", codes(rep))
+		t.Fatalf("codes = %v", issueCodes(rep))
 	}
 	for _, is := range rep.Issues {
 		if is.Code == "declared-file-not-in-tarball" && is.Range != "docs" {
@@ -164,7 +164,7 @@ func TestTarballEntryOutsidePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep.Verdict != Blocked || !has(rep, "tarball-entry-outside-package") {
-		t.Fatalf("verdict = %q, codes = %v", rep.Verdict, codes(rep))
+		t.Fatalf("verdict = %q, codes = %v", rep.Verdict, issueCodes(rep))
 	}
 }
 
@@ -179,7 +179,7 @@ func TestTarballEntrySymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !has(rep, "tarball-entry-unsafe") {
-		t.Fatalf("codes = %v", codes(rep))
+		t.Fatalf("codes = %v", issueCodes(rep))
 	}
 	var seen bool
 	for _, is := range rep.Issues {
@@ -194,7 +194,7 @@ func TestTarballEntrySymlink(t *testing.T) {
 		}
 	}
 	if !seen || rep.Verdict != Blocked {
-		t.Fatalf("verdict = %q, codes = %v", rep.Verdict, codes(rep))
+		t.Fatalf("verdict = %q, codes = %v", rep.Verdict, issueCodes(rep))
 	}
 }
 
@@ -224,10 +224,10 @@ func TestTarballPatchDeclaredButNotPacked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !has(rep, "declared-file-not-in-tarball") {
-		t.Fatalf("codes = %v, want declared-file-not-in-tarball", codes(rep))
+		t.Fatalf("codes = %v, want declared-file-not-in-tarball", issueCodes(rep))
 	}
 	if !has(rep, "patch-unreadable") {
-		t.Fatalf("codes = %v, want patch-unreadable from the same cause", codes(rep))
+		t.Fatalf("codes = %v, want patch-unreadable from the same cause", issueCodes(rep))
 	}
 	if rep.Verdict != Blocked {
 		t.Fatalf("verdict = %q", rep.Verdict)

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/atop0914/dshfit/internal/codes"
 	"github.com/atop0914/dshfit/internal/manifest"
 	"github.com/atop0914/dshfit/internal/semver"
 )
@@ -114,12 +115,12 @@ func checkTarball(p *manifest.Plugin) []Issue {
 
 	var issues []Issue
 	for _, u := range p.Unsafe {
-		code := "tarball-entry-outside-package"
+		code := codes.TarballEntryOutsidePackage
 		detail := fmt.Sprintf("archive entry %q resolves outside the package root (package/), so "+
 			"extracting it could write anywhere on disk; the entry was refused, so the package is "+
 			"not safe to install", u.Path)
 		if u.Reason != manifest.ReasonOutside {
-			code = "tarball-entry-unsafe"
+			code = codes.TarballEntryUnsafe
 			detail = fmt.Sprintf("archive entry %q is a %s entry; a package that ships links or "+
 				"special files can redirect an extractor through them, so the entry was refused",
 				u.Path, u.Reason)
@@ -141,7 +142,7 @@ func checkTarball(p *manifest.Plugin) []Issue {
 		}
 		issues = append(issues, Issue{
 			Severity: Block,
-			Code:     "declared-file-not-in-tarball",
+			Code:     codes.DeclaredFileNotInTarball,
 			Range:    f,
 			Detail: fmt.Sprintf("files[] declares %q but it is not in the archive; npm packed the "+
 				"package without it (.npmignore, a skipped prepare, or a stale entry), so whatever "+
@@ -191,7 +192,7 @@ func checkBundle(p *manifest.Plugin) []Issue {
 	if p.Bundle == nil || p.Bundle.Patch == "" {
 		return []Issue{{
 			Severity: Block,
-			Code:     "no-bundle",
+			Code:     codes.NoBundle,
 			Detail: "package.json has no dsh.bundle.patch, so the installer records a dependency " +
 				"but appends no bundle to dsh.profile.bundles; the plugin installs and never mounts",
 		}}
@@ -207,7 +208,7 @@ func checkBundle(p *manifest.Plugin) []Issue {
 	if len(p.Files) > 0 && !filesCover(p.Files, patch) && !packedAnyway {
 		issues = append(issues, Issue{
 			Severity: Block,
-			Code:     "patch-missing-from-files",
+			Code:     codes.PatchMissingFromFiles,
 			Range:    patch,
 			Detail: fmt.Sprintf("files[] does not include %q, so the published tarball omits it while "+
 				"dsh.bundle.patch still points at it; the package installs and contributes nothing", patch),
@@ -218,7 +219,7 @@ func checkBundle(p *manifest.Plugin) []Issue {
 	if err != nil {
 		issues = append(issues, Issue{
 			Severity: Block,
-			Code:     "patch-unreadable",
+			Code:     codes.PatchUnreadable,
 			Range:    patch,
 			Detail:   err.Error(),
 		})
@@ -228,7 +229,7 @@ func checkBundle(p *manifest.Plugin) []Issue {
 		if e.Name != "" && e.Name != p.Name {
 			issues = append(issues, Issue{
 				Severity: Block,
-				Code:     "patch-name-mismatch",
+				Code:     codes.PatchNameMismatch,
 				Detail: fmt.Sprintf("patch row %q inserts name %q, but the package is %q; "+
 					"cordis cannot resolve the entry", e.ID, e.Name, p.Name),
 			})
@@ -236,7 +237,7 @@ func checkBundle(p *manifest.Plugin) []Issue {
 		if e.ID == "" {
 			issues = append(issues, Issue{
 				Severity: Warn,
-				Code:     "patch-row-without-id",
+				Code:     codes.PatchRowWithoutID,
 				Detail:   fmt.Sprintf("patch row for %q has no id, so user config layers cannot target it", e.Name),
 			})
 		}
@@ -301,11 +302,11 @@ func RejectingPeers(peers map[string]string, host semver.Version) []PeerRejectio
 func checkPeers(p *manifest.Plugin, host semver.Version) []Issue {
 	var issues []Issue
 	for _, r := range RejectingPeers(p.Peers, host) {
-		code := "peer-range-excludes-host"
+		code := codes.PeerRangeExcludesHost
 		if r.Reason == "" {
 			// A range that does not parse is its own cause: no rewrite of the
 			// numbers fixes it, the syntax has to.
-			code = "unparseable-peer-range"
+			code = codes.UnparseablePeerRange
 		}
 		issues = append(issues, Issue{
 			Severity: Block,
@@ -332,7 +333,7 @@ func checkEngines(p *manifest.Plugin, host semver.Version) []Issue {
 	if err != nil {
 		return []Issue{{
 			Severity: Warn,
-			Code:     "unparseable-engines-dsh",
+			Code:     codes.UnparseableEnginesDSH,
 			Range:    raw,
 			Detail:   fmt.Sprintf("engines.dsh %q cannot be parsed: %v", raw, err),
 		}}
@@ -343,7 +344,7 @@ func checkEngines(p *manifest.Plugin, host semver.Version) []Issue {
 	}
 	return []Issue{{
 		Severity: Warn,
-		Code:     "engines-dsh-excludes-host",
+		Code:     codes.EnginesDSHExcludesHost,
 		Range:    raw,
 		Reason:   string(exp.Kind),
 		Detail: exp.Detail + "; engines.dsh is declared intent only (no reader enforces it today), " +

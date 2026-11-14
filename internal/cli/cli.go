@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/atop0914/dshfit/internal/codes"
 	"github.com/atop0914/dshfit/internal/compat"
 	"github.com/atop0914/dshfit/internal/manifest"
 	"github.com/atop0914/dshfit/internal/version"
@@ -150,7 +151,7 @@ func runCheck(args []string, out, errOut io.Writer) int {
 				Verdict: compat.Blocked,
 				Issues: []compat.Issue{{
 					Severity: compat.Block,
-					Code:     "manifest-unreadable",
+					Code:     codes.ManifestUnreadable,
 					Detail:   err.Error(),
 				}},
 			})

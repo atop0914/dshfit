@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/atop0914/dshfit/internal/codes"
 	"github.com/atop0914/dshfit/internal/compat"
 	"github.com/atop0914/dshfit/internal/fix"
 	"github.com/atop0914/dshfit/internal/manifest"
@@ -363,7 +364,7 @@ func sortedSet(set map[string]bool) []string {
 // edits, which is why they are never merged into "incompatible".
 func prescription(g Group, host string) string {
 	switch g.Code {
-	case "peer-range-excludes-host":
+	case codes.PeerRangeExcludesHost:
 		if g.Reason == string(semver.KindPreReleaseGate) {
 			return fmt.Sprintf("the numbers already pass; only npm's prerelease gate refuses %s. "+
 				"Add a clause naming that exact core with a prerelease tag — `|| >=%s` — which is the "+
@@ -371,23 +372,23 @@ func prescription(g Group, host string) string {
 		}
 		return fmt.Sprintf("the declared range stops before %s: widen the lower or upper bound "+
 			"(appending `|| >=%s` is the smallest widening). Re-run to confirm.", host, host)
-	case "unparseable-peer-range":
+	case codes.UnparseablePeerRange:
 		return "the range cannot be parsed, so npm cannot admit any version through it; fix the syntax first"
-	case "engines-dsh-excludes-host":
+	case codes.EnginesDSHExcludesHost:
 		return fmt.Sprintf("declare support for %s in engines.dsh if it is real. Nothing enforces this "+
 			"field today, so it changes no verdict — it is the author's stated window, and it is currently "+
 			"narrower than the range above.", host)
-	case "patch-missing-from-files":
+	case codes.PatchMissingFromFiles:
 		return fmt.Sprintf("add %q to files[] (or stop excluding it): the published tarball ships no patch, "+
 			"so the plugin installs and mounts nothing", g.Range)
-	case "patch-unreadable":
+	case codes.PatchUnreadable:
 		return fmt.Sprintf("%q must exist and contain an insert block; without a readable patch the "+
 			"plugin mounts nothing", g.Range)
-	case "patch-name-mismatch":
+	case codes.PatchNameMismatch:
 		return "the patch must insert an entry whose name equals the package name, or cordis cannot resolve it"
-	case "patch-row-without-id":
+	case codes.PatchRowWithoutID:
 		return "give the inserted row an id so user config layers can target it"
-	case "unparseable-engines-dsh":
+	case codes.UnparseableEnginesDSH:
 		return "engines.dsh cannot be parsed, so the stated support window is unreadable; fix the syntax"
 	}
 	return "no automatic prescription for this code; read the detail"
