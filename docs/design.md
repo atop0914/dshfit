@@ -493,15 +493,56 @@ Atomic writes (temp file + rename) because a half-written cache file reads back
 as "this package has three versions", and a truncated packument is worse than a
 missing one: the missing one triggers a fetch.
 
+## Why the documentation is a test
+
+A tool that asks to be trusted before an upgrade lives or dies on whether its own
+claims hold. The README makes three kinds of claim, and each one can rot without
+any test going red:
+
+- **A code in the table is a promise about output.** `internal/codes` is now the
+  only definition of the identifiers, their severity and whether only an archive
+  can produce them. Three things fail the suite instead of reaching a terminal:
+  a code with no fixture that produces it (`internal/compat/evidence_test.go`
+  iterates the registry, so a new code without a fixture is red), a fixture whose
+  issue severity disagrees with the table, and a directory input producing a
+  code that only an archive can prove. The README table is compared against the
+  same registry by `internal/docs` — set, severity, and the `(tarball only)`
+  marker, in both directions.
+- **A command in the README is a promise about behaviour, and its unit is the
+  exit code.** `scripts/readme-rehearsal.sh` runs each of them against the
+  repository's fixtures and asserts the code, not that something was printed. The
+  registry section is exercised through `--offline` against a seeded cache whose
+  `--registry-url` is a closed port: the rehearsal dials nothing, and a step that
+  tried to would print "could not be checked" and fail. Both directions are
+  covered where both exist — a `.tgz` with a missing file is blocked, a complete
+  one is not.
+- **An install line is a promise about the artifact, not the checkout.**
+  `scripts/install-rehearsal.sh` runs `go install ...@ref` into an empty `GOBIN`
+  and then runs the first example from a directory holding nothing but a plugin.
+  It exists because `go install` runs no Makefile: a previous project shipped a
+  release whose binary printed `dev (unknown, unknown)`, with every `make` target
+  green. That is also why `internal/version` falls back to
+  `debug.ReadBuildInfo` and prints only the fields it has, rather than
+  placeholders.
+
+The rule behind all three: a document is checked by executing it, and a checker
+that cannot run returns an error rather than an empty problem list. A checker
+that fails open is quoted as evidence that everything is fine.
+
 ## Next
 
 1. ~~Registry lookup~~ — done (Day 9): `profile --registry`, `--offline`, and a
    per-host cache. Still open: using the admitting version list to propose an
    install (`install that`) next to the range edit (`write this`), and reading
    `dist.tarball` so a specific published version can be checked as an archive.
-2. DSH plugin shell: a sidebar panel that runs the same Go core over stdio, so
-   the matrix is visible where people actually upgrade. The protocol half exists
-   (`dshfit serve`); the panel half is still being written, and it renders what
-   the sidecar returns rather than deciding anything itself.
-3. CI mode: the same matrix as a GitHub Action comment, gated on the exit code
-   the commands already define.
+2. DSH plugin shell: the panel's rendering half and its view model exist, and
+   `dshfit serve` speaks the protocol. What is missing is the transport between
+   them — the host has no Remote endpoint registered, so the default loader fails
+   with `no-transport` instead of returning an empty profile. Wiring it needs the
+   host's registration convention (`dsh-api-remotes`), not a guess at the
+   protocol.
+3. ~~CI mode~~ — done (Day 8): `profile --format markdown` into
+   `$GITHUB_STEP_SUMMARY`, plus `scripts/ci-profile-matrix.sh` gating on whether
+   the counts still match the measured table. Deliberately not a PR comment: a
+   fork PR's `GITHUB_TOKEN` is read-only, and a job that goes red on a 403 looks
+   like the tool is broken.

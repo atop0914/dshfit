@@ -100,6 +100,15 @@ lint:
 readme:
 	sh scripts/readme-rehearsal.sh
 
+# The command a user actually types. `go install` runs no Makefile, so none of
+# the -ldflags above apply — this target exists to prove the binary still knows
+# what it is without them. It needs the module proxy, so it is not in `ci`;
+# run it before tagging.
+REF ?= latest
+.PHONY: install-check
+install-check:
+	sh scripts/install-rehearsal.sh $(REF)
+
 .PHONY: ci
 ci: fmt-check vet test-noskip race deps-check build-check lint
 

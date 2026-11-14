@@ -346,7 +346,22 @@ Zero runtime dependencies, single static binary:
 
 ```console
 $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
+$ dshfit version
+dshfit v0.3.1 4f1c9ab 2026-11-20T10:12:33Z
 ```
+
+`go install` runs no Makefile, so none of the `-ldflags` a `make build` passes
+are applied: the binary derives its identity from the module it was built from
+(`debug.ReadBuildInfo`) and prints only the fields it actually has. A local build
+that knows neither a commit nor a date prints `dshfit <version>` instead of
+`dev (unknown, unknown)`, and a binary whose identity cannot be established at
+all says `dev` rather than inventing one.
+
+`scripts/install-rehearsal.sh` (`make install-check`) is that command, run before
+a release: it installs into an empty `GOBIN` and runs the first example in this
+document from a directory containing nothing but a plugin, so "the README's
+install line works" is checked by running it rather than by reading it. It needs
+the module proxy, which is why it is not part of `make ci`.
 
 ## Usage
 
