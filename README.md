@@ -56,7 +56,14 @@ happens to, or why. That is the gap `dshfit` fills.
 | `tarball-entry-outside-package` | block | *(tarball only)* an archive entry resolves outside `package/` |
 | `tarball-entry-unsafe` | block | *(tarball only)* an archive entry is a symlink, hardlink, or special file |
 | `engines-dsh-excludes-host` | warn | author's declared support window excludes the host |
+| `unparseable-engines-dsh` | warn | `engines.dsh` is written but cannot be parsed |
 | `patch-row-without-id` | warn | a patch row cannot be targeted by a user config layer |
+| `manifest-unreadable` | block | the input could not be read as a plugin at all |
+
+Every code in this table is in `internal/codes`, which is what the binary emits
+from, and `internal/compat/evidence_test.go` holds a fixture that produces each
+one. A code with no fixture, or a row whose severity disagrees with the code,
+fails the test suite rather than reaching a user's terminal unexplained.
 
 `engines.dsh` is a warning, never a block, because it is currently a declaration
 that nothing in the host enforces. Blocking on it would reject plugins that load
@@ -349,6 +356,7 @@ $ dshfit profile --host <version> [--json|--format text|markdown] [--registry [-
 $ dshfit diff --from <version> --to <version> [--json] <listing.json|->
 $ dshfit serve
 $ dshfit version
+$ dshfit help
 ```
 
 `--registry` flags for `profile` (all optional, none of them on by default):
@@ -489,14 +497,17 @@ yours to make. When it exits 1 it says so and names the escape hatch
 
 What it does **not** do yet:
 
-- **No registry fetching.** It reads a directory you point it at, a local
-  `.tgz`, or the listing your profile's package manager already produced; it does
-  not download from npm.
-- **No fix suggestion from the registry.** It computes the smallest edit to the
-  range and proves npm will accept it, but it does not look up what is published,
-  so it cannot say "pin `x@1.2.3`, which already declares `^0.1.0-rc.6 ||
-  ^0.2.0-rc.1`". For that you still need the registry, and a version that admits
-  the host is a different question from a range that does.
+- **No registry fetching unless you ask for it.** A plain run reads a directory
+  you point it at, a local `.tgz`, or the listing your profile's package manager
+  already produced, and opens no socket. `--registry` (and `--offline` for the
+  cache alone) is the one exception, and it fetches packuments — metadata — only:
+  it never downloads a tarball, installs anything, or resolves dependencies.
+- **No fix suggestion derived from the registry.** It computes the smallest edit
+  to the range and proves npm will accept it, and with `--registry` it can say
+  which released version admits the host. It does not combine the two into
+  "upgrade to `x@1.2.3`, which already declares `^0.1.0-rc.6 || ^0.2.0-rc.1`",
+  because that is a different question — a version that admits the host — and
+  answering it half-way would look like a recommendation.
 - **No judgement of what a plugin does.** This tool answers "will it load". It
   does not audit capabilities, scripts, or network access — that is a different
   question with a different answer.

@@ -119,6 +119,13 @@ func Run(in io.Reader, args []string, out, errOut io.Writer) int {
 	return 2
 }
 
+// Subcommands returns the command words Run dispatches, in usage order. It is
+// exported so the documentation check can ask the binary what it accepts
+// instead of keeping a second list that would only ever agree with itself.
+func Subcommands() []string {
+	return []string{"check", "profile", "diff", "serve", "version", "help"}
+}
+
 func runCheck(args []string, out, errOut io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(errOut)
