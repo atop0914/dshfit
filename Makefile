@@ -93,6 +93,13 @@ build-check:
 lint:
 	golangci-lint run ./...
 
+# Every command the README shows, run against the fixtures, with the exit code as
+# the assertion. It belongs in CI (and is) because it dials nothing: the registry
+# section is rehearsed through --offline and a seeded cache.
+.PHONY: readme
+readme:
+	sh scripts/readme-rehearsal.sh
+
 .PHONY: ci
 ci: fmt-check vet test-noskip race deps-check build-check lint
 

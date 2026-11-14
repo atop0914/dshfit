@@ -48,6 +48,14 @@ jobs:
           set -e
           test "$code" -eq 1
 
+      - name: README rehearsal
+        # Every command the README shows, run against the fixtures with its exit
+        # code as the assertion. A document whose commands are not executed is a
+        # document that drifts; this step is what makes "the README is accurate"
+        # a checkable claim rather than a promise. It dials nothing — the
+        # registry section is exercised through --offline and a seeded cache.
+        run: sh scripts/readme-rehearsal.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:

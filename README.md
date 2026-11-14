@@ -493,6 +493,28 @@ itself** — writing into `.git/hooks` is a change to your repository, so it is
 yours to make. When it exits 1 it says so and names the escape hatch
 (`--no-verify`); a hook that blocks silently teaches people to bypass it.
 
+### Rehearsed commands
+
+Every command in this document is executed by `scripts/readme-rehearsal.sh`
+(`make readme`) against the fixtures in `testdata/`, with **the exit code as the
+assertion** — not "it printed something that looked right". A clean profile must
+exit 0, a blocked one 1, a typo 2, and a `blocked → blocked` diff that changes
+its cause must still be a difference.
+
+It dials nothing. The registry section is rehearsed through `--offline` and a
+seeded cache directory whose `--registry-url` points at a closed port: a step
+that opened a socket would print "could not be checked" instead of the cached
+answer and fail. That also pins the cache key — the seeded file is named from a
+hash of package, host and registry URL, so if the key stops covering the URL the
+file stops matching and the rehearsal breaks.
+
+Two more gates keep this document from drifting:
+
+- `internal/docs` compares the code table above with `internal/codes` row by row,
+  including each severity and the `(tarball only)` marker.
+- The same check fails on a relative link or a backticked repository path that
+  does not exist, and on a subcommand this README never names.
+
 ## Scope and honesty
 
 What it does **not** do yet:
