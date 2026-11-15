@@ -347,7 +347,7 @@ Zero runtime dependencies, single static binary:
 ```console
 $ go install github.com/atop0914/dshfit/cmd/dshfit@latest
 $ dshfit version
-dshfit v0.3.1 4f1c9ab 2026-11-20T10:12:33Z
+dshfit v1.0.0 2f7b1c4 2026-11-15T12:40:11Z
 ```
 
 `go install` runs no Makefile, so none of the `-ldflags` a `make build` passes
@@ -362,6 +362,15 @@ a release: it installs into an empty `GOBIN` and runs the first example in this
 document from a directory containing nothing but a plugin, so "the README's
 install line works" is checked by running it rather than by reading it. It needs
 the module proxy, which is why it is not part of `make ci`.
+
+`scripts/release-check.sh` (`make release-check`) is the other half. A release
+states its version in three places — the tag, the newest section of
+[CHANGELOG.md](CHANGELOG.md), and the identity the built binary reports — and the
+failure when they disagree is silent, because it reaches the user who installed
+the result rather than the person who published it. This target compares the
+three on the tagged commit, refuses a dirty tree (a version string carrying
+`-dirty` is not reproducible from the tag), and refuses release notes with no
+body.
 
 ## Usage
 
