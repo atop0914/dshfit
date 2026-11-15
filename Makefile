@@ -109,6 +109,15 @@ REF ?= latest
 install-check:
 	sh scripts/install-rehearsal.sh $(REF)
 
+# The three places a release states its version — the tag, the newest CHANGELOG
+# section, and what a `make build` binary reports — compared against each other
+# on the tagged commit. Run it after tagging and before publishing: the failure
+# it catches (notes describing one version, binary printing another) is silent
+# otherwise, and it is only visible to the user who installed the result.
+.PHONY: release-check
+release-check:
+	sh scripts/release-check.sh
+
 .PHONY: ci
 ci: fmt-check vet test-noskip race deps-check build-check lint
 
